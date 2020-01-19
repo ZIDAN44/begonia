@@ -14,11 +14,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -46,42 +41,19 @@
 #include <linux/usb.h>
 #include <linux/usb/otg.h>
 #include "musb.h"
-#include <linux/wakelock.h>
+#include <linux/pm_wakeup.h>
 #include <linux/version.h>
-#ifdef CONFIG_MEDIATEK_SOLUTION
-#include "aee.h"
+#include <linux/clk.h>
+#if defined(CONFIG_MTK_CHARGER)
+extern enum charger_type mt_get_charger_type(void);
 #endif
 
-/* data type used from mt_typdefs.h, mt_typedefs.h is removed now */
-typedef enum {
-	KAL_FALSE = 0,
-	KAL_TRUE = 1,
-} kal_bool;
-#ifndef TRUE
-#define TRUE  true
+/* to prevent 32 bit project misuse */
+#if defined(CONFIG_MTK_MUSB_DRV_36BIT) && !defined(CONFIG_64BIT)
+#error
 #endif
-typedef unsigned int kal_uint32;
-typedef uint8_t kal_uint8;
 
-/* data type and MACRO used from mt_typdefs.h for UART USB SWITCH */
-typedef unsigned char UINT8;
-typedef unsigned int UINT32;
-
-#define WRITE_REGISTER_UINT32(reg, val)	((*(volatile UINT32 * const)(reg)) = (val))
-#define READ_REGISTER_UINT8(reg)	((*(volatile UINT8 * const)(reg)))
-#define WRITE_REGISTER_UINT8(reg, val)	((*(volatile UINT8 * const)(reg)) = (val))
-
-#define INREG8(x)           READ_REGISTER_UINT8((UINT8 *)((void *)(x)))
-#define OUTREG8(x, y)       WRITE_REGISTER_UINT8((UINT8 *)((void *)(x)), (UINT8)(y))
-#define OUTREG32(x, y)      WRITE_REGISTER_UINT32((UINT32 *)((void *)(x)), (UINT32)(y))
-
-#define DRV_Reg8(addr)              INREG8(addr)
-#define DRV_WriteReg8(addr, data)   OUTREG8(addr, data)
-#define DRV_WriteReg32(addr, data)  OUTREG32(addr, data)
-
-
-
-#ifdef MUSB_QMU_SUPPORT
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 #include "mtk_qmu.h"
 #endif
 
@@ -90,27 +62,28 @@ typedef unsigned int UINT32;
 struct musb;
 struct musb_hw_ep;
 struct musb_ep;
-extern volatile bool usb_is_host;
 extern int musb_fake_CDP;
-extern int musb_is_shutting;
-extern int musb_fake_disc;
-extern int musb_connect_legacy;
-extern int musb_removed;
 extern int kernel_init_done;
 extern int musb_force_on;
 extern int musb_host_dynamic_fifo;
 extern int musb_host_dynamic_fifo_usage_msk;
-extern unsigned musb_uart_debug;
+extern unsigned int musb_uart_debug;
+extern bool musb_host_db_enable;
+extern bool musb_host_db_workaround1;
+extern bool musb_host_db_workaround2;
+extern long musb_host_db_delay_ns;
+extern long musb_host_db_workaround_cnt;
 extern struct musb *mtk_musb;
 extern bool mtk_usb_power;
+extern ktime_t ktime_ready;
 extern int ep_config_from_table_for_host(struct musb *musb);
 extern int polling_vbus_value(void *data);
 
 #if defined(CONFIG_USBIF_COMPLIANCE)
 extern bool polling_vbus;
 extern struct task_struct *vbus_polling_tsk;
-extern void musb_set_host_request_flag(struct musb *musb, unsigned value);
-extern void pmic_bvalid_det_int_en(int);
+extern void musb_set_host_request_flag(struct musb *musb, unsigned int value);
+extern void pmic_bvalid_det_int_en(int i);
 #define CONFIG_USBIF_COMPLIANCE_PMIC
 #if defined(CONFIG_USBIF_COMPLIANCE_PMIC)
 extern int PMIC_IMM_GetOneChannelValue(int dwChannel, int deCount, int trimd);
@@ -123,8 +96,7 @@ extern signed_int battery_meter_get_charger_voltage(void);
 #endif
 extern void send_otg_event(enum usb_otg_event event);
 #endif
-
-
+extern void musb_bug(void);
 
 /* Helper defines for struct musb->hwvers */
 #define MUSB_HWVERS_MAJOR(x)	((x >> 10) & 0x1f)
@@ -147,26 +119,9 @@ extern void send_otg_event(enum usb_otg_event event);
 #include "musb_gadget.h"
 #include <linux/usb/hcd.h>
 #include "musb_host.h"
-#ifdef CONFIG_OF
 
-enum {
-	usb0 = 0,
-	usb_sif,
-	usb_acm_temp_device,
-};
-extern struct device_node *dts_np;
-#endif
-
-
-#ifdef ENABLE_STORAGE_LOGGER
-#define USB_LOGGER(msg_id, func_name, ...) \
-	do { \
-		if (unlikely(is_dump_musb())) { \
-			ADD_USB_TRACE(msg_id, func_name, __VA_ARGS__); \
-		} \
-	} while (0)
-#else
-#define USB_LOGGER(msg_id, func_name, args...) do {} while (0)
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+#include <linux/usb/class-dual-role.h>
 #endif
 
 /* NOTE:  otg and peripheral-only state machines start at B_IDLE.
@@ -182,19 +137,19 @@ extern struct device_node *dts_np;
 
 /****************************** PERIPHERAL ROLE *****************************/
 
-extern irqreturn_t musb_g_ep0_irq(struct musb *);
-extern void musb_g_tx(struct musb *, u8);
-extern void musb_g_rx(struct musb *, u8);
-extern void musb_g_reset(struct musb *);
-extern void musb_g_suspend(struct musb *);
-extern void musb_g_resume(struct musb *);
-extern void musb_g_wakeup(struct musb *);
-extern void musb_g_disconnect(struct musb *);
+extern irqreturn_t musb_g_ep0_irq(struct musb *musb);
+extern void musb_g_tx(struct musb *musb, u8 epnum);
+extern void musb_g_rx(struct musb *musb, u8 epnum);
+extern void musb_g_reset(struct musb *musb);
+extern void musb_g_suspend(struct musb *musb);
+extern void musb_g_resume(struct musb *musb);
+extern void musb_g_wakeup(struct musb *musb);
+extern void musb_g_disconnect(struct musb *musb);
 
 /****************************** HOST ROLE ***********************************/
-extern irqreturn_t musb_h_ep0_irq(struct musb *);
-extern void musb_host_tx(struct musb *, u8);
-extern void musb_host_rx(struct musb *, u8);
+extern irqreturn_t musb_h_ep0_irq(struct musb *musb);
+extern void musb_host_tx(struct musb *musb, u8 epnum);
+extern void musb_host_rx(struct musb *musb, u8 epnum);
 
 /****************************** CONSTANTS ********************************/
 
@@ -240,7 +195,10 @@ enum musb_g_ep0_state {
  * sections 5.5 "Device Timings" and 6.6.5 "Timers".
  */
 #define OTG_TIME_A_WAIT_VRISE	100	/* msec (max) */
-#define OTG_TIME_A_WAIT_BCON	1100	/* min 1 second */
+/* when switch host to device within min 1 second, the otg state can't*/
+/* switch to b-idle successfully, then connect to host and can't run */
+/* gadget rest in BUS_RESET, so need to decrease min 1 second to 600ms*/
+#define OTG_TIME_A_WAIT_BCON	600	/* min 1 second */
 #define OTG_TIME_A_AIDL_BDIS	200	/* min 200 msec */
 #if defined(CONFIG_USBIF_COMPLIANCE)
 #define OTG_TIME_B_ASE0_BRST	155	/* min 3.125 ms */
@@ -268,14 +226,14 @@ enum musb_g_ep0_state {
 
 #define MUSB_MODE(musb) ((musb)->is_host ? "Host" : "Peripheral")
 
-typedef enum {
+enum writeFunc_enum {
 	funcWriteb = 0,
 	funcWritew,
 	funcWritel,
 	funcInterrupt
-} writeFunc_enum;
+};
 
-void dumpTime(writeFunc_enum func, int epnum);
+void dumpTime(enum writeFunc_enum func, int epnum);
 
 /******************************** TYPES *************************************/
 
@@ -303,7 +261,12 @@ struct musb_platform_ops {
 	void (*set_vbus)(struct musb *musb, int on);
 
 	int (*adjust_channel_params)(struct dma_channel *channel,
-				      u16 packet_sz, u8 *mode, dma_addr_t *dma_addr, u32 *len);
+		u16 packet_sz, u8 *mode, dma_addr_t *dma_addr, u32 *len);
+
+	void (*enable_clk)(struct musb *musb);
+	void (*disable_clk)(struct musb *musb);
+	void (*prepare_clk)(struct musb *musb);
+	void (*unprepare_clk)(struct musb *musb);
 };
 
 /*
@@ -385,11 +348,10 @@ struct musb {
 	struct semaphore musb_lock;
 	/* device lock */
 	spinlock_t lock;
-
 	const struct musb_platform_ops *ops;
 	struct musb_context_registers context;
 
-	 irqreturn_t (*isr)(int, void *);
+	irqreturn_t (*isr)(int irq, void *priv);
 	struct work_struct irq_work;
 	struct work_struct otg_notifier_work;
 	u16 hwvers;
@@ -398,9 +360,9 @@ struct musb {
 	struct delayed_work carplay_work;
 #endif
 	struct musb_fifo_cfg *fifo_cfg;
-	unsigned fifo_cfg_size;
+	unsigned int fifo_cfg_size;
 	struct musb_fifo_cfg *fifo_cfg_host;
-	unsigned fifo_cfg_host_size;
+	unsigned int fifo_cfg_host_size;
 	u32 fifo_size;
 
 	u16 intrrxe;
@@ -443,12 +405,8 @@ struct musb {
 	u16 int_rx;
 	u16 int_tx;
 
-#ifdef MUSB_QMU_SUPPORT
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	u32 int_queue;
-#ifdef QMU_TASKLET
-	u32 qmu_done_intr;
-	struct tasklet_struct qmu_done;
-#endif
 #endif
 
 	struct usb_phy *xceiv;
@@ -467,6 +425,7 @@ struct musb {
 	u8 nr_endpoints;
 
 	int (*board_set_power)(int state);
+	void (*usb_rev6_setting)(int value);
 
 	u8 min_power;		/* vbus for periph, in mA/2 */
 
@@ -517,7 +476,7 @@ struct musb {
 	enum musb_g_ep0_state ep0_state;
 	struct usb_gadget g;	/* the gadget */
 	struct usb_gadget_driver *gadget_driver;	/* its driver */
-	struct wake_lock usb_lock;
+	struct wakeup_source usb_lock;
 
 	/*
 	 * FIXME: Remove this flag.
@@ -550,6 +509,9 @@ struct musb {
 	enum usb_otg_event otg_event;
 #endif
 	struct workqueue_struct *st_wq;
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+	struct dual_role_phy_instance *dr_usb;
+#endif /* CONFIG_DUAL_ROLE_USB_INTF */
 };
 
 static inline struct musb *gadget_to_musb(struct usb_gadget *g)
@@ -557,7 +519,8 @@ static inline struct musb *gadget_to_musb(struct usb_gadget *g)
 	return container_of(g, struct musb, g);
 }
 
-static inline int musb_read_fifosize(struct musb *musb, struct musb_hw_ep *hw_ep, u8 epnum)
+static inline int musb_read_fifosize
+	(struct musb *musb, struct musb_hw_ep *hw_ep, u8 epnum)
 {
 	void __iomem *mbase = musb->mregs;
 	u8 reg = 0;
@@ -605,9 +568,9 @@ extern void musb_put_id(struct device *dev, int id);
 extern void musb_write_fifo(struct musb_hw_ep *ep, u16 len, const u8 *src);
 extern void musb_read_fifo(struct musb_hw_ep *ep, u16 len, u8 *dst);
 
-extern void musb_load_testpacket(struct musb *);
-extern void musb_generic_disable(struct musb *);
-extern irqreturn_t musb_interrupt(struct musb *);
+extern void musb_load_testpacket(struct musb *musb);
+extern void musb_generic_disable(struct musb *musb);
+extern irqreturn_t musb_interrupt(struct musb *musb);
 extern irqreturn_t dma_controller_irq(int irq, void *private_data);
 
 extern void musb_hnp_stop(struct musb *musb);
@@ -638,7 +601,8 @@ static inline int musb_platform_set_mode(struct musb *musb, u8 mode)
 	return musb->ops->set_mode(musb, mode);
 }
 
-static inline void musb_platform_try_idle(struct musb *musb, unsigned long timeout)
+static inline void
+	musb_platform_try_idle(struct musb *musb, unsigned long timeout)
 {
 	if (musb->ops->try_idle)
 		musb->ops->try_idle(musb, timeout);
@@ -668,6 +632,30 @@ static inline int musb_platform_exit(struct musb *musb)
 	return musb->ops->exit(musb);
 }
 
+static inline void musb_platform_enable_clk(struct musb *musb)
+{
+	if (musb->ops->enable_clk)
+		musb->ops->enable_clk(musb);
+}
+
+static inline void musb_platform_disable_clk(struct musb *musb)
+{
+	if (musb->ops->disable_clk)
+		musb->ops->disable_clk(musb);
+}
+
+static inline void musb_platform_prepare_clk(struct musb *musb)
+{
+	if (musb->ops->prepare_clk)
+		musb->ops->prepare_clk(musb);
+}
+
+static inline void musb_platform_unprepare_clk(struct musb *musb)
+{
+	if (musb->ops->unprepare_clk)
+		musb->ops->unprepare_clk(musb);
+}
+
 /* #if LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0) */
 #if 1
 static inline const char *otg_state_string(enum usb_otg_state state)
@@ -675,6 +663,19 @@ static inline const char *otg_state_string(enum usb_otg_state state)
 	return usb_otg_state_string(state);
 }
 #endif
-
+enum {
+	USB_DPIDLE_ALLOWED = 0,
+	USB_DPIDLE_FORBIDDEN,
+	USB_DPIDLE_SRAM,
+	USB_DPIDLE_TIMER
+};
+extern void usb_hal_dpidle_request(int mode);
+extern void register_usb_hal_dpidle_request(void (*function)(int));
 extern void register_usb_hal_disconnect_check(void (*function)(void));
+extern void wake_up_bat(void);
+extern void wait_tx_done(u8 epnum, unsigned int timeout_ns);
+extern int host_tx_refcnt_inc(int epnum);
+extern int host_tx_refcnt_dec(int epnum);
+extern void host_tx_refcnt_reset(int epnum);
+extern void dump_tx_ops(u8 ep_num);
 #endif				/* __MUSB_CORE_H__ */

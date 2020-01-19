@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -17,17 +18,15 @@
 #include <linux/utsname.h>
 #include <linux/module.h>
 #include <linux/moduleparam.h>
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 #include <linux/printk.h>
 #include <linux/platform_device.h>
+#include <linux/slab.h>
 #include <log_store_kernel.h>
-#ifdef CONFIG_MT_BOOT_TIME_CPU_BOOST
-#include <mt_cpufreq.h>
-#endif
+
 #include "internal.h"
-#ifdef CONFIG_MT_BOOT_TIME_CPU_BOOST
-#include "mt_hotplug_strategy_internal.h"
-#endif
+#include "mtk_sched_mon.h"
+
 #define BOOT_STR_SIZE 256
 #define BUF_COUNT 12
 #define LOGS_PER_BUF 80
@@ -36,7 +35,8 @@
 struct log_t {
 	/* task cmdline for first 16 bytes
 	 * and boot event for the rest
-	 * if TRACK_TASK_COMM is on */
+	 * if TRACK_TASK_COMM is on
+	 */
 	char *comm_event;
 #ifdef TRACK_TASK_COMM
 	pid_t pid;
@@ -50,11 +50,11 @@ static DEFINE_MUTEX(bootprof_lock);
 static bool enabled;
 static int bootprof_lk_t, bootprof_pl_t, bootprof_logo_t;
 static u64 timestamp_on, timestamp_off;
-int boot_finish = 0;
+bool boot_finish;
 
-module_param_named(pl_t, bootprof_pl_t, int, S_IRUGO | S_IWUSR);
-module_param_named(lk_t, bootprof_lk_t, int, S_IRUGO | S_IWUSR);
-module_param_named(logo_t, bootprof_logo_t, int, S_IRUGO | S_IWUSR);
+module_param_named(pl_t, bootprof_pl_t, int, 0644);
+module_param_named(lk_t, bootprof_lk_t, int, 0644);
+module_param_named(logo_t, bootprof_logo_t, int, 0644);
 
 #define MSG_SIZE 128
 
@@ -67,11 +67,11 @@ void log_boot(char *str)
 	if (!enabled)
 		return;
 	ts = sched_clock();
-	pr_err("BOOTPROF:%10Ld.%06ld:%s\n", nsec_high(ts), nsec_low(ts), str);
+	pr_info("BOOTPROF:%10lld.%06ld:%s\n", msec_high(ts), msec_low(ts), str);
 
 	mutex_lock(&bootprof_lock);
 	if (log_count >= (LOGS_PER_BUF * BUF_COUNT)) {
-		pr_err("[BOOTPROF] not enuough bootprof buffer\n");
+		pr_info("[BOOTPROF] not enuough bootprof buffer\n");
 		goto out;
 	} else if (log_count && !(log_count % LOGS_PER_BUF)) {
 		bootprof[log_count / LOGS_PER_BUF] =
@@ -79,7 +79,7 @@ void log_boot(char *str)
 				GFP_ATOMIC | __GFP_NORETRY | __GFP_NOWARN);
 	}
 	if (!bootprof[log_count / LOGS_PER_BUF]) {
-		pr_err("no memory for bootprof\n");
+		pr_info("no memory for bootprof\n");
 		goto out;
 	}
 	p = &bootprof[log_count / LOGS_PER_BUF][log_count % LOGS_PER_BUF];
@@ -168,22 +168,13 @@ void bootprof_pdev_register(unsigned long long ts, struct platform_device *pdev)
 static void bootup_finish(void)
 {
 	initcall_debug = 0;
+#ifdef CONFIG_MTK_PRINTK_UART_CONSOLE
 
-#ifdef CONFIG_MT_BOOT_TIME_CPU_BOOST
-	hps_ctxt.little_num_base_perf_serv = 1;
 #endif
-
-
-#ifdef CONFIG_MT_PRINTK_UART_CONSOLE
-	mt_disable_uart();
-#endif
-#ifdef CONFIG_MT_SCHED_MON_DEFAULT_ENABLE
+#ifdef CONFIG_MTK_SCHED_MON_DEFAULT_ENABLE
 	mt_sched_monitor_switch(1);
 #endif
-#ifdef CONFIG_MT_BOOT_TIME_CPU_BOOST
-	mt_cpufreq_set_min_freq(MT_CPU_DVFS_LITTLE, 0);
-#endif
-	set_logtoomuch_enable(1);
+//	set_logtoomuch_enable(1);
 }
 
 static void mt_bootprof_switch(int on)
@@ -192,8 +183,8 @@ static void mt_bootprof_switch(int on)
 	if (enabled ^ on) {
 		unsigned long long ts = sched_clock();
 
-		pr_err("BOOTPROF:%10Ld.%06ld: %s\n",
-		       nsec_high(ts), nsec_low(ts), on ? "ON" : "OFF");
+		pr_info("BOOTPROF:%10lld.%06ld: %s\n",
+		       msec_high(ts), msec_low(ts), on ? "ON" : "OFF");
 
 		if (on) {
 			enabled = 1;
@@ -202,7 +193,7 @@ static void mt_bootprof_switch(int on)
 			/* boot up complete */
 			enabled = 0;
 			timestamp_off = ts;
-			boot_finish = 1;
+			boot_finish = true;
 			log_store_bootup();
 			bootup_finish();
 		}
@@ -250,30 +241,33 @@ static int mt_bootprof_show(struct seq_file *m, void *v)
 		SEQ_printf(m, "%10d        : %s\n", bootprof_pl_t, "preloader");
 		if (bootprof_logo_t > 0) {
 			SEQ_printf(m, "%10d        : %s (%s: %d)\n",
-			bootprof_lk_t, "lk", "Start->Show logo", bootprof_logo_t);
+			bootprof_lk_t, "lk", "Start->Show logo",
+			bootprof_logo_t);
 		} else {
-			SEQ_printf(m, "%10d        : %s\n", bootprof_lk_t, "lk");
+			SEQ_printf(m, "%10d        : %s\n",
+			bootprof_lk_t, "lk");
 		}
 		/* SEQ_printf(m, "%10d        : %s\n",
-		 * gpt_boot_time() - bootprof_pl_t - bootprof_lk_t, "lk->Kernel");
+		 * gpt_boot_time() - bootprof_pl_t
+		 * - bootprof_lk_t, "lk->Kernel");
 		 */
 		SEQ_printf(m, "----------------------------------------\n");
 	}
 
-	SEQ_printf(m, "%10Ld.%06ld : ON\n",
-		   nsec_high(timestamp_on), nsec_low(timestamp_on));
+	SEQ_printf(m, "%10lld.%06ld : ON\n",
+		   msec_high(timestamp_on), msec_low(timestamp_on));
 
 	for (i = 0; i < log_count; i++) {
 		p = &bootprof[i / LOGS_PER_BUF][i % LOGS_PER_BUF];
 		if (!p->comm_event)
 			continue;
 #ifdef TRACK_TASK_COMM
-#define FMT "%10Ld.%06ld :%5d-%-16s: %s\n"
+#define FMT "%10lld.%06ld :%5d-%-16s: %s\n"
 #else
-#define FMT "%10Ld.%06ld : %s\n"
+#define FMT "%10lld.%06ld : %s\n"
 #endif
-		SEQ_printf(m, FMT, nsec_high(p->timestamp),
-			   nsec_low(p->timestamp),
+		SEQ_printf(m, FMT, msec_high(p->timestamp),
+			   msec_low(p->timestamp),
 #ifdef TRACK_TASK_COMM
 			   p->pid, p->comm_event, p->comm_event + TASK_COMM_LEN
 #else
@@ -282,8 +276,8 @@ static int mt_bootprof_show(struct seq_file *m, void *v)
 			   );
 	}
 
-	SEQ_printf(m, "%10Ld.%06ld : OFF\n",
-		   nsec_high(timestamp_off), nsec_low(timestamp_off));
+	SEQ_printf(m, "%10lld.%06ld : OFF\n",
+		   msec_high(timestamp_off), msec_low(timestamp_off));
 	SEQ_printf(m, "----------------------------------------\n");
 	return 0;
 }
@@ -320,7 +314,6 @@ static int __init init_bootprof_buf(void)
 	if (!bootprof[0])
 		goto fail;
 	mt_bootprof_switch(1);
-
 fail:
 	return 0;
 }

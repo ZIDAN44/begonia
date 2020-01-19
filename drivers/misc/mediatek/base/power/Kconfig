@@ -1,94 +1,81 @@
-config MTK_CLKMGR
-	bool "Mediatek proprietary clock management"
+config MTK_CPU_FREQ
+	bool "MTK CPU FREQ"
 	default n
 	---help---
-	  Mediatek proprietary clock management is used to operate
-          the clocks. The clocks are composed of CG, MUX, PLL,
-          non-MTCMOS. The operations of clocks are enabling,
-          disabling, and querying status. If this config is not set,
-          system will use COMMON_CLK instead.
-
-config MTK_DISABLE_PICACHU
-        bool "Disable Picachu"
-        default n
-        ---help---
-          PICACHU (PI CAlibration and CHaracterization Utility) aims
-          at the voltage calibration during booting. It increases
-	  the voltage when needed.
-
-config MTK_DISABLE_SODI
-	bool "Disable SODI"
-	---help---
-	  SODI is short for the Screen On Deep Idle.
-	  It's a power saving mode when the screen is still truned on,
-	  but the device always display the same image.
-	  Select if you want to disable it.
-
-config MTK_HYBRID_CPU_DVFS
-	bool "MediaTek Hybrid CPU DVFS support"
-	default n
-	help
-	  This kernel config can be used to control CONFIG_HYBRID_CPU_DVFS
-	  defined/undefined in the header file of CPUHVFS driver.
-	  If CONFIG_HYBRID_CPU_DVFS is defined, CPUHVFS driver will bring up
-	  DVFS processor to do CPU DVFS.
-
-config MTK_SPM_USE_EXT_BUCK
-	bool "MTK SPM use ext buck"
-	default n
-	help
-	  Vmd1 is controlled by an ext buck. If you want to use ext buck for
-	  Vmd1, set y here, or it dependeds on the efuse value.
-
-config MT2701_DCM
-	bool "Enable MT2701/MT7623 dynamic clock manager"
-	default y
-	depends on (MACH_MT2701 || ARCH_MT7623) && MTK_BASE_POWER
-	---help---
-	  Dynamic Clock Manager(DCM) can help slow bus frequency when
-	  DCM's hardware detects bus is in idle state.
-
-config MTK_CPU_HOTPLUG_DEBUG_0
-	bool "MediaTek CPU Hotplug DEBUG 0"
-	default y
-	help
-	  This kernel config can be used to enable log message in cpu notify
-	  callback function in register_cpu_notifier. This is useful for CPU
-	  hotplug debug.
-	  If unsure, say Y.
-
-config MTK_CPU_HOTPLUG_DEBUG_1
-	bool "MediaTek CPU Hotplug DEBUG 1"
-	default n
-	help
-	  This kernel config can be used to enable log message in cpu notify
-	  callback function in notifier_call_chain. This is useful for CPU
-	  hotplug debug but the performance will be drop down.
+	  This kernel config can be used to enable CPU FREQ.
+	  When enable this option, CPU frequency and voltage will be
+	  changed which will depended on CPU FREQ governor.
 	  If unsure, say N.
 
-config MTK_CPU_HOTPLUG_DEBUG_2
-	bool "MediaTek CPU Hotplug DEBUG 2"
-	default y
-	help
-	  This kernel config can be used to enable aee to log cpu notify
-	  callback in notifier_call_chain. This is useful for CPU hotplug
-	  debug.
+config MTK_PTPOD
+	bool "MTK PTPOD"
+	default n
+	---help---
+	  This kernel config can be used to enable PTPOD.
+	  When enable this option, voltage will be
+	  changed which will depended on chip.
+	  If unsure, say N.
+
+config MTK_STATIC_POWER
+	bool "MTK STATIC POWER"
+	default n
+	---help---
+	  This kernel config can be used to enable static power.
+	  This information can provide power data to someone who
+	  need it
+	  If unsure, say N.
+
+config MTK_UNIFY_POWER
+	bool "MTK UNIFY POWER"
+	default n
+	---help---
+	  This kernel config can be used to enable unified power table.
+	  This table can provide power data and capacity to someone who
+	  need it.
 	  If unsure, say Y.
 
-config PROFILE_CPU
-	bool "Support for CPU hot-plug profiling"
-	default y
-	help
-	  This kernel config can be used to enable basic CPU hot-plug
-	  latency for each one. This information is useful for someone who
-	  care the latency, for example, thermal.
-	  If unsure, say Y.
+config MTK_CM_MGR
+	bool "MTK CM MGR"
+	default n
+	---help---
+	  This kernel config can be used to enable CM MGR. When enable
+	  this option, dram opp level will be changed which will depended
+	  on power table.
+	  If unsure, say N.
 
-config MTK_CPU_HOTPLUG_DEBUG_3
-	bool "MediaTek CPU Hotplug DEBUG 3"
-	default y
-	help
-	  This kernel config can be used to enable advanced CPU hot-plug
-	  latency profiling. This information is useful for someone who
-	  care the latency, for example, thermal.
-	  If unsure, say Y.
+config MTK_SWPM
+	bool "MTK SW Power Meter"
+	default n
+	---help---
+	  This kernel config can be used to enable SW power meter. When enable
+	  this option, user can turn on SW power meter and get average power
+	  for each power rail for low power debugging.
+	  If unsure, say N.
+
+config MTK_QOS_FRAMEWORK
+	bool "MTK QOS FRAMEWORK"
+	default n
+	---help---
+	  This kernel config can be used to enable MTK QOS FRAMEWORK.
+	  When enabling this option, BW Limiter and BW Bound Detector
+	  will be enabled and set EMI hardware.
+	  If unsure, say N.
+
+config MTK_QOS_V1
+	bool "MTK QOS Framework Ver 1.0"
+	default y if MACH_MT6768
+	---help---
+	  This version support QOS ver 1.0 feature sets.
+	  The dram opp could be controlled by the BW prediction.
+	  It is also mapped with sspm qos v1.
+	  If unsure, say N.
+
+config MTK_QOS_V2
+	bool "MTK QOS Framework Ver 2.0"
+	default y if MACH_MT6785
+	select MTK_QOS_FRAMEWORK
+	---help---
+	  This version support QOS version 2.0 feature sets.
+	  It supports BW prediction, BW bound detection, and BW limiter.
+	  It is also mapped with sspm qos v2.
+	  If unsure, say N.

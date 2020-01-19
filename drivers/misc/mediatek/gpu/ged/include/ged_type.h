@@ -17,7 +17,7 @@
 typedef enum GED_ERROR_TAG {
 	GED_OK,
 	GED_ERROR_FAIL,
-	GED_ERROR_OOM ,
+	GED_ERROR_OOM,
 	GED_ERROR_OUT_OF_FD,
 	GED_ERROR_FAIL_WITH_LIMIT,
 	GED_ERROR_TIMEOUT,
@@ -53,7 +53,7 @@ typedef enum GED_INFO_TAG {
 	GED_PRE_FREQ_IDX = 4,
 	GED_CUR_FREQ = 5,
 	GED_CUR_FREQ_IDX = 6,
-	GED_MAX_FREQ_IDX = 7 ,
+	GED_MAX_FREQ_IDX = 7,
 	GED_MAX_FREQ_IDX_FREQ = 8,
 	GED_MIN_FREQ_IDX = 9,
 	GED_MIN_FREQ_IDX_FREQ = 10,
@@ -67,23 +67,8 @@ typedef enum GED_INFO_TAG {
 	GED_LATEST_START = 18,
 	GED_FPS = 19,
 
-	GED_CPU0_LOADING = 100,
-	GED_CPU1_LOADING = 101,
-	GED_CPU2_LOADING = 102,
-	GED_CPU3_LOADING = 103,
-	GED_CPU4_LOADING = 104,
-	GED_CPU5_LOADING = 105,
-	GED_CPU6_LOADING = 106,
-	GED_CPU7_LOADING = 107,
-	GED_CPU8_LOADING = 108,
-	GED_CPU9_LOADING = 109,
-
 	GED_INFO_SIZE
 } GED_INFO;
-
-#if defined(CONFIG_ARCH_MT6797)
-extern unsigned int hps_get_per_cpu_load(int cpu, int isReset);
-#endif
 
 typedef enum {
 	GED_DVFS_VSYNC_OFFSET_DEBUG_CLEAR_EVENT = 0,
@@ -99,6 +84,7 @@ typedef enum {
 	GED_DVFS_VSYNC_OFFSET_VR_EVENT = 10,
 	GED_DVFS_BOOST_HOST_EVENT = 11,
 	GED_DVFS_VSYNC_OFFSET_VILTE_VID_EVENT = 12,
+	GED_DVFS_VSYNC_OFFSET_LOW_LATENCY_MODE_EVENT = 13,
 } GED_DVFS_VSYNC_OFFSET_SWITCH_CMD;
 
 typedef enum {
@@ -131,13 +117,13 @@ typedef struct GED_DVFS_UM_QUERY_PACK_TAG {
 	char bFirstBorn;
 	unsigned int ui32GPULoading;
 	unsigned int ui32GPUFreqID;
-	unsigned long gpu_cur_freq;
-	unsigned long gpu_pre_freq;
+	unsigned int gpu_cur_freq;
+	unsigned int gpu_pre_freq;
 	long long usT;
 	long long nsOffset;
-	unsigned long ul3DFenceDoneTime;
-	unsigned long ulPreCalResetTS_us;
-	unsigned long ulWorkingPeriod_us;
+	unsigned long long ul3DFenceDoneTime;
+	unsigned long long ulPreCalResetTS_us;
+	unsigned long long ulWorkingPeriod_us;
 	unsigned int ui32TargetPeriod_us;
 	unsigned int ui32BoostValue;
 } GED_DVFS_UM_QUERY_PACK;

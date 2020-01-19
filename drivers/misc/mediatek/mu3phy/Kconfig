@@ -94,9 +94,9 @@ config U3_PHY_SMT_LOOP_BACK_SUPPORT
 	default n
 	---help---
 	  Enables support for testing SuperSpeed signal is correct.
-          Use to check the USB-C connector is mounted properly.
-          U3 PHY sends a pattern of signal from TX1/2+, TX1/2-.
-          And receive the signal from RX1/2+, RX1/2-. Then
-          verify the signal is correct. If loopback signal is
-          corrent, it means the path from TX to RX is smooth.
+	  Use to check the USB-C connector is mounted properly.
+	  U3 PHY sends a pattern of signal from TX1/2+, TX1/2-.
+	  And receive the signal from RX1/2+, RX1/2-. Then
+	  verify the signal is correct. If loopback signal is
+	  corrent, it means the path from TX to RX is smooth.
 	  If unsure, say N.

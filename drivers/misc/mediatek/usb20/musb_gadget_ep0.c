@@ -15,11 +15,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -90,17 +85,19 @@ static int service_tx_status_request(
 			result[0] = musb->g.host_request;
 		} else {
 #endif
-		result[0] = musb->is_self_powered << USB_DEVICE_SELF_POWERED;
-		result[0] |= musb->may_wakeup << USB_DEVICE_REMOTE_WAKEUP;
-		if (musb->g.is_otg) {
-			result[0] |= musb->g.b_hnp_enable
-				<< USB_DEVICE_B_HNP_ENABLE;
-			result[0] |= musb->g.a_alt_hnp_support
-				<< USB_DEVICE_A_ALT_HNP_SUPPORT;
-			result[0] |= musb->g.a_hnp_support
-				<< USB_DEVICE_A_HNP_SUPPORT;
+			result[0] = musb->is_self_powered
+				<< USB_DEVICE_SELF_POWERED;
+			result[0] |= musb->may_wakeup
+				<< USB_DEVICE_REMOTE_WAKEUP;
+			if (musb->g.is_otg) {
+				result[0] |= musb->g.b_hnp_enable
+					<< USB_DEVICE_B_HNP_ENABLE;
+				result[0] |= musb->g.a_alt_hnp_support
+					<< USB_DEVICE_A_ALT_HNP_SUPPORT;
+				result[0] |= musb->g.a_hnp_support
+					<< USB_DEVICE_A_HNP_SUPPORT;
 #if defined(CONFIG_USBIF_COMPLIANCE)
-		}
+			}
 #endif
 		}
 		break;
@@ -221,7 +218,8 @@ static inline void musb_try_b_hnp_enable(struct musb *musb)
 	devctl = musb_readb(mbase, MUSB_DEVCTL);
 	u8 opstate = musb_readb(mbase, MUSB_OPSTATE);
 
-	pr_info("HNP: Setting HR Done - DEVCTL: 0x%x, OPSTATE: 0x%x\n", devctl, opstate);
+	pr_info("HNP: Setting HR Done - DEVCTL: 0x%x, OPSTATE: 0x%x\n"
+			, devctl, opstate);
 #endif
 }
 
@@ -292,7 +290,8 @@ __acquires(musb->lock)
 					musb_ep = &ep->ep_out;
 
 				if (!ep) {
-					ERR("ep %d is null, is_in=%d\n", epnum, is_in);
+					pr_err("ep %d is null, is_in=%d\n"
+						, epnum, is_in);
 					break;
 				}
 
@@ -325,15 +324,20 @@ __acquires(musb->lock)
 				/* Maybe start the first request in the queue */
 				request = next_request(musb_ep);
 				if (!musb_ep->busy && request) {
-					/* limit debug mechanism to avoid printk too much */
-					static DEFINE_RATELIMIT_STATE(ratelimit, 1 * HZ, 10);
-
-					if ((__ratelimit(&ratelimit)))
-						DBG(0, "restarting the request\n");
+					/*
+					 * limit debug mechanism
+					 *  to avoid printk too much
+					 */
+					static DEFINE_RATELIMIT_STATE(ratelimit
+							, HZ, 10);
+					if (__ratelimit(&ratelimit))
+						pr_debug("<ratelimit> restarting the request\n");
 					musb_ep_restart(musb, request);
-				} else if (!is_in) { /* Modification for ALPS00451478 */
+				} else if (!is_in) {
+					/* Modification for ALPS00451478 */
 					csr  = musb_readw(regs, MUSB_RXCSR);
-					DBG(0, "no more req, clr RXPKTRDY to avoid err RX FIFO/DMA read!! csr:0x%x\n"
+					DBG(0,
+						"no more req, clr RXPKTRDY to avoid err RX FIFO/DMA read!! csr:0x%x\n"
 							, csr);
 					csr &= ~(MUSB_RXCSR_RXPKTRDY);
 					musb_writew(regs, MUSB_RXCSR, csr);
@@ -361,7 +365,8 @@ __acquires(musb->lock)
 				case USB_DEVICE_TEST_MODE:
 					if (musb->g.speed != USB_SPEED_HIGH)
 #if defined(CONFIG_USBIF_COMPLIANCE)
-						pr_debug("SET_FEATURE - NOT HIGH SPEED - speed: 0x%x\n", musb->g.speed);
+						pr_debug("SET_FEATURE - NOT HIGH SPEED - speed: 0x%x\n"
+							, musb->g.speed);
 #else
 						goto stall;
 #endif
@@ -421,25 +426,34 @@ __acquires(musb->lock)
 #if defined(CONFIG_USBIF_COMPLIANCE)
 					case 0x6:
 						musb->g.otg_srp_reqd = 1;
-						pr_debug("SET_FEATURE - TEST_MODE - OTG_SRP_REQD: 0x%x\n",
-								musb->g.otg_srp_reqd);
+						pr_debug("SET_FEATURE - TEST_MODE - OTG_SRP_REQD: 0x%x\n"
+							, musb->g.otg_srp_reqd);
 						break;
 
 					case 0x7:
 						musb->g.host_request = 1;
-						pr_debug("SET_FEATURE - TEST_MODE - OTG_HNP_REQD: 0x%x\n",
-								musb->g.host_request);
+						pr_debug("SET_FEATURE - TEST_MODE - OTG_HNP_REQD: 0x%x\n"
+							, musb->g.host_request);
 						break;
 #endif
 					default:
 						goto stall;
 					}
 
+					if (musb->usb_rev6_setting &&
+						(musb->test_mode_nr ==
+						MUSB_TEST_K ||
+						musb->test_mode_nr ==
+						MUSB_TEST_J))
+						musb->usb_rev6_setting(0x0);
+
 					/* enter test mode after irq */
 #if defined(CONFIG_USBIF_COMPLIANCE)
 					if (handled > 0 &&
-						((ctrlrequest->wIndex >> 8) != 6) &&
-						((ctrlrequest->wIndex >> 8) != 7))
+						((ctrlrequest->wIndex >> 8)
+						!= 6) &&
+						((ctrlrequest->wIndex >> 8)
+						!= 7))
 #else
 					if (handled > 0)
 #endif
@@ -496,7 +510,8 @@ stall:
 					musb_ep = &ep->ep_out;
 
 				if (!ep) {
-					ERR("ep %d is null, is_in=%d\n", epnum, is_in);
+					pr_err("ep %d is null, is_in=%d\n",
+						epnum, is_in);
 					break;
 				}
 
@@ -558,8 +573,8 @@ static void ep0_rxstate(struct musb *musb)
 	 * should have provided the rx buffer before setup() returned.
 	 */
 	if (req) {
-		void		*buf = req->buf + req->actual;
-		unsigned	len = req->length - req->actual;
+		void *buf = req->buf + req->actual;
+		unsigned int len = req->length - req->actual;
 
 		/* read the buffer */
 		count = musb_readb(regs, MUSB_COUNT0);
@@ -618,7 +633,7 @@ static void ep0_txstate(struct musb *musb)
 
 	/* load the data */
 	fifo_src = (u8 *) request->buf + request->actual;
-	fifo_count = min((unsigned) MUSB_EP0_FIFOSIZE,
+	fifo_count = min((unsigned int) MUSB_EP0_FIFOSIZE,
 		request->length - request->actual);
 	musb_write_fifo(&musb->endpoints[0], fifo_count, fifo_src);
 	request->actual += fifo_count;
@@ -661,7 +676,7 @@ musb_read_setup(struct musb *musb, struct usb_ctrlrequest *req)
 {
 	struct musb_request	*r;
 	void __iomem		*regs = musb->control_ep->regs;
-	unsigned long		time_count = 3*1000*1000; /* 3 sec */
+	int time_count = 500; /* 0.5 sec */
 
 	musb_read_fifo(&musb->endpoints[0], sizeof(*req), (u8 *)req);
 
@@ -673,10 +688,6 @@ musb_read_setup(struct musb *musb, struct usb_ctrlrequest *req)
 		req->bRequest,
 		le16_to_cpu(req->wValue),
 		le16_to_cpu(req->wIndex),
-		le16_to_cpu(req->wLength));
-
-	USB_LOGGER(MUSB_READ_SETUP, MUSB_READ_SETUP, req->bRequestType,
-		req->bRequest, le16_to_cpu(req->wValue), le16_to_cpu(req->wIndex),
 		le16_to_cpu(req->wLength));
 
 	/* clean up any leftover transfers */
@@ -704,9 +715,9 @@ musb_read_setup(struct musb *musb, struct usb_ctrlrequest *req)
 		/* skip if waiting over 3 sec */
 		while ((musb_readw(regs, MUSB_CSR0)
 				& MUSB_CSR0_RXPKTRDY) != 0 && time_count--)
-			udelay(1);
-		if (!time_count)
-			ERR("%s, timeout\n", __func__);
+			mdelay(1);
+		if (time_count <= 0)
+			pr_err("%s, timeout\n", __func__);
 		musb->ackpend = 0;
 	} else
 		musb->ep0_state = MUSB_EP0_STAGE_RX;
@@ -721,12 +732,9 @@ __acquires(musb->lock)
 	int usb_state = 0;
 	/* u16 w_value = le16_to_cpu(ctrlrequest->wValue); */
 
-	if (!musb->gadget_driver)
+	if (!musb->gadget_driver || !musb->softconnect)
 		return -EOPNOTSUPP;
 	spin_unlock(&musb->lock);
-
-	USB_LOGGER(FORWARD_TO_DRIVER,	FORWARD_TO_DRIVER,
-		musb->gadget_driver->driver.name);
 
 	retval = musb->gadget_driver->setup(&musb->g, ctrlrequest);
 
@@ -763,9 +771,6 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 	DBG(2, "csr %04x, count %d, ep0stage %s\n",
 			csr, len, decode_ep0stage(musb->ep0_state));
 
-	USB_LOGGER(MUSB_G_EP0_IRQ, MUSB_G_EP0_IRQ, csr, len,
-		musb_readb(mbase, MUSB_FADDR), decode_ep0stage(musb->ep0_state));
-
 	if (csr & MUSB_CSR0_P_DATAEND) {
 		/*
 		 * If DATAEND is set we should not call the callback,
@@ -796,15 +801,15 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			musb->ep0_state = MUSB_EP0_STAGE_STATUSIN;
 			break;
 		default:
-			ERR("SetupEnd came in a wrong ep0stage %s\n",
-			    decode_ep0stage(musb->ep0_state));
-			ERR("SetupEnd, csr = %x\n", csr);
+			pr_err("SetupEnd came in a wrong ep0stage %s\n"
+					"SetupEnd, csr = %x\n",
+				decode_ep0stage(musb->ep0_state), csr);
 			setup_end_err = true;
 		}
 		csr = musb_readw(regs, MUSB_CSR0);
 		/* NOTE:  request may need completion */
 		if (unlikely(setup_end_err))
-			ERR("SetupEnd, csr2 = %x\n", csr);
+			pr_err("SetupEnd, csr2 = %x\n", csr);
 	}
 
 	/* docs from Mentor only describe tx, rx, and idle/setup states.
@@ -846,7 +851,7 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 		else if (musb->test_mode) {
 			DBG(0, "entering TESTMODE\n");
 			musb_sync_with_bat(musb, USB_SUSPEND);
-			if (MUSB_TEST_PACKET == musb->test_mode_nr)
+			if (musb->test_mode_nr == MUSB_TEST_PACKET)
 				musb_load_testpacket(musb);
 
 			musb_writeb(mbase, MUSB_TESTMODE,
@@ -860,14 +865,14 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			struct musb_request	*req;
 
 			if (unlikely(setup_end_err))
-				ERR("SetupEnd, ep0 giveback\n");
+				pr_err("SetupEnd, ep0 giveback\n");
 
 			req = next_ep0_request(musb);
 			if (req)
 				musb_g_ep0_giveback(musb, &req->request);
 
 			if (unlikely(setup_end_err))
-				ERR("SetupEnd, ep0 giveback done\n");
+				pr_err("SetupEnd, ep0 giveback done\n");
 		}
 
 		/*
@@ -878,7 +883,7 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			goto setup;
 
 		if (unlikely(setup_end_err))
-				ERR("SetupEnd, ep0 idle\n");
+			pr_err("SetupEnd, ep0 idle\n");
 
 		retval = IRQ_HANDLED;
 		musb->ep0_state = MUSB_EP0_STAGE_IDLE;
@@ -902,11 +907,22 @@ setup:
 			int			handled = 0;
 
 			if (len != 8) {
-				ERR("SETUP packet len %d != 8 ?\n", len);
+				pr_err("SETUP packet len %d != 8 ?\n", len);
 				break;
 			}
 			musb_read_setup(musb, &setup);
 			retval = IRQ_HANDLED;
+
+			if (unlikely(setup_end_err)) {
+				DBG(0,
+					"%s SETUP req%02x.%02x v%04x i%04x l%d\n",
+					decode_ep0stage(musb->ep0_state),
+					setup.bRequestType,
+					setup.bRequest,
+					le16_to_cpu(setup.wValue),
+					le16_to_cpu(setup.wIndex),
+					le16_to_cpu(setup.wLength));
+			}
 
 			/* sometimes the RESET won't be reported */
 			if (unlikely(musb->g.speed == USB_SPEED_UNKNOWN)) {
@@ -1008,7 +1024,8 @@ finish:
 	}
 
 	if (unlikely(setup_end_err))
-		ERR("SetupEnd, retval=%d\n", retval);
+		ERR("SetupEnd, retval=%d, ep0stage=%s\n"
+		, retval, decode_ep0stage(musb->ep0_state));
 
 	return retval;
 }

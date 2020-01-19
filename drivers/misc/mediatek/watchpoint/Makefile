@@ -12,4 +12,4 @@
 #
 
 obj-y += hw_watchpoint.o
-obj-y += mt_dbg.o
+obj-y += mtk_dbg.o

@@ -25,7 +25,11 @@
 #include "mtkpasr_drv.h"
 
 /* Header file for DRAMC PASR configuration */
-#include <mt_dramc.h>
+#include <mtk_dramc.h>
+
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+#include <mtk_vcorefs_manager.h>
+#endif
 
 #ifdef CONFIG_MTK_DCS
 #include <mt-plat/mtk_meminfo.h>
@@ -60,7 +64,8 @@ static void count_free_pages(unsigned long *spfn, unsigned long *epfn)
 		if (min_epfn <= max_spfn)
 			continue;
 		mtkpasr_banks[bank].free += (min_epfn - max_spfn);
-		MTKPASR_PRINT("@@@ bank[%d] free[%lu]\n", bank, mtkpasr_banks[bank].free);
+		MTKPASR_PRINT("@@@ bank[%d] free[%lu]\n",
+				bank, mtkpasr_banks[bank].free);
 	}
 
 	MTKPASR_PRINT("\n");
@@ -78,15 +83,16 @@ static void mtkpasr_debug_channel_switch(void)
 
 	which = 16;
 	do {
-		pr_alert("(@)%s: MASK[0x%lx]\n", __func__, mtkpasr_on);
+		pr_info("(@)%s: MASK[0x%lx]\n", __func__, mtkpasr_on);
 		for (chc = 1; chc <= 4; chc <<= 1) {
-			pr_alert("(@@@)chconfig[%d]\n", chc);
+			pr_info("(@@@)chconfig[%d]\n", chc);
 			if (fill_pasr_on_by_chconfig(chc, vec, mtkpasr_on)) {
-				pr_alert("Bad chconfig!\n");
+				pr_info("Bad chconfig!\n");
 				continue;
 			}
 			for (i = 0; i < get_channel_num(); i++)
-				pr_alert("%d[%d][0x%lx]\n", i, vec[i].channel, vec[i].pasr_on);
+				pr_info("%d[%d][0x%lx]\n", i, vec[i].channel,
+						vec[i].pasr_on);
 		}
 		mtkpasr_on = ((mtkpasr_on >> 15) | (mtkpasr_on << 1)) & 0xFFFF;
 	} while (--which > 0);
@@ -100,7 +106,7 @@ static void restore_pasr(void)
 retry:
 	/* APMCU flow */
 	if (exit_pasr_dpd_config() != 0)
-		pr_warn("%s: failed to program DRAMC!\n", __func__);
+		pr_info("%s: failed to program DRAMC!\n", __func__);
 	else
 		mtkpasr_on = 0x0;
 
@@ -115,7 +121,7 @@ static void restore_dcs_pasr(void)
 retry:
 	/* APMCU flow */
 	if (exit_dcs_pasr_dpd_config() != 0)
-		pr_warn("%s: failed to program DRAMC!\n", __func__);
+		pr_info("%s: failed to program DRAMC!\n", __func__);
 	else
 		mtkpasr_on = 0x0;
 
@@ -127,6 +133,7 @@ retry:
 static void enable_dcs_pasr(void)
 {
 	int chconfig, ret;
+	int chid;
 
 	if (!dcs_initialied()) {
 		dcs_status = DCS_NORMAL;
@@ -135,16 +142,24 @@ static void enable_dcs_pasr(void)
 	}
 
 	/* Step0 - switch to lowpower mode */
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	ret = dcs_exit_perf(DCS_KICKER_DEBUG);
+	if (ret)
+		pr_info("exit perf failed, kick=%d\n", DCS_KICKER_DEBUG);
+#endif
+
 	ret = dcs_switch_to_lowpower();
 	if (ret != 0) {
-		pr_warn("%s: failed to swtich to lowpower mode, error (%d)\n", __func__, ret);
+		pr_info("%s: failed to switch to lowpower mode, error (%d)\n",
+				__func__, ret);
 		return;
 	}
 
 	/* Step1 - Acquire DCS status */
 	ret = dcs_get_dcs_status_lock(&chconfig, &dcs_status);
 	if (ret != 0) {
-		pr_warn("%s: failed to get DCS status, error (%d)\n", __func__, ret);
+		pr_info("%s: failed to get DCS status, error (%d)\n",
+				__func__, ret);
 		return;
 	}
 
@@ -154,30 +169,34 @@ static void enable_dcs_pasr(void)
 
 	/* Sanity check */
 	if (dcs_status == DCS_NORMAL && chconfig != max_channel_num) {
-		pr_warn("%s: max_channel_num(%u) DCS status (%d, %d) mismatched\n",
-				__func__, max_channel_num, chconfig, dcs_status);
+		pr_info("%s: max_channel_num(%u) DCS status (%d, %d) mismatched\n",
+				__func__, max_channel_num,
+				chconfig, dcs_status);
 		goto err;
 	}
 
 	/* Step2 - Configure PASR by current stable channel setting (DRAFT) */
 	if (dcs_status == DCS_NORMAL) {
 bypass_dcs:
-		if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8) != 0)
-			pr_warn("%s: failed to program DRAMC!\n", __func__);
+		if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8))
+			pr_info("%s: failed to program DRAMC!\n", __func__);
 	} else if (dcs_status == DCS_LOWPOWER) {
 		/* Get channel-based PASR configuration */
-		ret = fill_pasr_on_by_chconfig(chconfig, mtkpasr_vec, mtkpasr_on);
+		ret = fill_pasr_on_by_chconfig(chconfig, mtkpasr_vec,
+				mtkpasr_on);
 		if (ret != 0) {
-			pr_warn("%s: failed to configure PASR, error (%d)\n", __func__, ret);
+			pr_info("%s: failed to configure PASR, error (%d)\n",
+					__func__, ret);
 			goto err;
 		}
-		enter_dcs_pasr_dpd_config(mtkpasr_vec[chconfig].pasr_on & 0xFF,
-					mtkpasr_vec[chconfig].pasr_on >> 0x8);
-		/* Step3 - Turn off DDRPHY */
-		if (mtkpasr_vec[chconfig].pasr_on == query_channel_segment_bits())
-			dram_dcs_turn_on_off_ch(0);
+
+		/* Configure DRAMC */
+		for (chid = 0; chid < max_channel_num; chid++)
+			enter_dcs_pasr_dpd_config(
+					mtkpasr_vec[chid].pasr_on & 0xFF,
+					mtkpasr_vec[chid].pasr_on >> 0x8, chid);
 	} else {
-		pr_warn("%s: should not be here\n", __func__);
+		pr_info("%s: should not be here\n", __func__);
 		goto err;
 	}
 
@@ -190,12 +209,12 @@ err:
 
 static void disable_dcs_pasr(void)
 {
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	int ret;
+#endif
+
 	if (!dcs_acquired)
 		return;
-
-	/* Turn on DDRPHY */
-	if (dcs_status == DCS_LOWPOWER)
-		dram_dcs_turn_on_off_ch(1);
 
 	/* Restore PASR */
 	if (dcs_status == DCS_NORMAL)
@@ -203,13 +222,20 @@ static void disable_dcs_pasr(void)
 	else if (dcs_status == DCS_LOWPOWER)
 		restore_dcs_pasr();
 	else
-		pr_warn("%s: should not be here\n", __func__);
+		pr_info("%s: should not be here\n", __func__);
 
 	/* Unlock DCS */
 	dcs_acquired = 0;
 	dcs_status = DCS_BUSY;
 	if (dcs_initialied())
 		dcs_get_dcs_status_unlock();
+
+#ifdef DCS_SCREENOFF_ONLY_MODE
+	/* enter performance mode */
+	ret = dcs_enter_perf(DCS_KICKER_DEBUG);
+	if (ret)
+		pr_info("enter perf failed, kick=%d\n", DCS_KICKER_DEBUG);
+#endif
 }
 #endif
 
@@ -221,6 +247,9 @@ static int mtkpasr_config(int times, get_range_t func)
 {
 	unsigned long spfn, epfn;
 	int which, i;
+#ifndef CONFIG_MTK_DCS
+	int retry = 3;
+#endif
 
 	/* Not enable */
 	if (!mtkpasr_enable)
@@ -246,17 +275,30 @@ static int mtkpasr_config(int times, get_range_t func)
 	/* Find valid PASR segment */
 	mtkpasr_on = 0x0;
 	for (i = 0; i < num_banks; i++)
-		if (mtkpasr_banks[i].free == (mtkpasr_banks[i].end_pfn - mtkpasr_banks[i].start_pfn))
+		if (mtkpasr_banks[i].free == (mtkpasr_banks[i].end_pfn -
+					mtkpasr_banks[i].start_pfn))
 			mtkpasr_on |= (1 << mtkpasr_banks[i].segment);
 
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_0);
+#endif
+
 #ifndef CONFIG_MTK_DCS
+retry_pasr:
 	/* APMCU flow */
 	MTKPASR_PRINT("%s: PASR[0x%lx]\n", __func__, mtkpasr_on);
-	if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8) != 0)
+	if (enter_pasr_dpd_config(mtkpasr_on & 0xFF, mtkpasr_on >> 0x8) != 0) {
+		if (--retry)
+			goto retry_pasr;
 		MTKPASR_PRINT("%s: failed to program DRAMC!\n", __func__);
+	}
 #else
 	/* Channel based PASR configuration */
 	enable_dcs_pasr();
+#endif
+
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_UNREQ);
 #endif
 
 	++mtkpasr_triggered;
@@ -281,10 +323,18 @@ static int mtkpasr_restore(void)
 
 	MTKPASR_PRINT("%s:+\n", __func__);
 
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_0);
+#endif
+
 #ifndef CONFIG_MTK_DCS
 	restore_pasr();
 #else
 	disable_dcs_pasr();
+#endif
+
+#ifdef MTK_PASR_VCORE_DVFS_CONTROL
+	vcorefs_request_dvfs_opp(KIR_PASR, OPP_UNREQ);
 #endif
 
 	MTKPASR_PRINT("%s:-\n", __func__);
@@ -301,32 +351,43 @@ static struct memory_lowpower_operation mtkpasr_handler = {
 /* ++ SYSFS Interface ++ */
 int mtkpasr_show_banks(char *buf)
 {
+#define MTKPASR_SHOW_BANKS_LIMIT	(128)
 	int i, len = 0, tmp;
 
 	/* Show banks */
 	for (i = 0; i < num_banks; i++) {
-		tmp = sprintf(buf, "Bank[%d] - start_pfn[0x%lx] end_pfn[0x%lx] segment[%d] rank[%d]\n",
-				i, mtkpasr_banks[i].start_pfn, mtkpasr_banks[i].end_pfn - 1,
-				mtkpasr_banks[i].segment, mtkpasr_banks[i].rank);
+		tmp = snprintf(buf, MTKPASR_SHOW_BANKS_LIMIT,
+				"Bank[%2d] - start_pfn[%6lx] end_pfn[%6lx] segment[%2d] rank[%d] %s\n",
+				i, mtkpasr_banks[i].start_pfn,
+				mtkpasr_banks[i].end_pfn - 1,
+				mtkpasr_banks[i].segment,
+				mtkpasr_banks[i].rank,
+				((mtkpasr_on >> mtkpasr_banks[i].segment) & 0x1)
+				? "[ON]" : "");
 		buf += tmp;
 		len += tmp;
 	}
 
+#undef MTKPASR_SHOW_BANKS_LIMIT
+
 	return len;
 }
 
-static ssize_t membank_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t membank_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	return mtkpasr_show_banks(buf);
 }
 
-static ssize_t enable_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t enable_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	return sprintf(buf, "%d\n", mtkpasr_enable);
 }
 
 /* 0: disable, 1: enable */
-static ssize_t enable_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t len)
+static ssize_t enable_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t len)
 {
 	int ret;
 	int value;
@@ -340,17 +401,49 @@ static ssize_t enable_store(struct device *dev, struct device_attribute *attr, c
 	return len;
 }
 
-static ssize_t mtkpasr_status_show(struct device *dev, struct device_attribute *attr, char *buf)
+/* MTKPASR status */
+static int show_pasr_status(char *buf)
 {
-	return sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n", mtkpasr_triggered, mtkpasr_on);
+	int len;
+
+	len = sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n",
+			mtkpasr_triggered, mtkpasr_on);
+
+#ifdef CONFIG_MTK_DCS
+	if (mtkpasr_vec) {
+		int i, tmp;
+
+		buf += len;
+		tmp = sprintf(buf,
+				"Channel-based PASR, max channel number[%d]\n",
+				max_channel_num);
+		buf += tmp;
+		len += tmp;
+		for (i = 0; i < max_channel_num; i++) {
+			tmp = sprintf(buf, "ch[%d] :: PASR-masked[0x%lx]\n",
+					i, mtkpasr_vec[i].pasr_on);
+			buf += tmp;
+			len += tmp;
+		}
+	}
+#endif
+	return len;
 }
 
-static ssize_t srmask_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t mtkpasr_status_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	return show_pasr_status(buf);
+}
+
+static ssize_t srmask_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	return sprintf(buf, "%lu\n", mtkpasr_srmask);
 }
 
-static ssize_t srmask_store(struct device *dev, struct device_attribute *attr, const char *buf, size_t len)
+static ssize_t srmask_store(struct device *dev, struct device_attribute *attr,
+		const char *buf, size_t len)
 {
 	int ret;
 	int value;
@@ -364,7 +457,8 @@ static ssize_t srmask_store(struct device *dev, struct device_attribute *attr, c
 }
 
 /* Show overall executing status */
-static ssize_t execstate_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t execstate_show(struct device *dev, struct device_attribute *attr,
+		char *buf)
 {
 	int len = 0, tmp;
 
@@ -379,7 +473,7 @@ static ssize_t execstate_show(struct device *dev, struct device_attribute *attr,
 	len += tmp;
 
 	/* MTKPASR status */
-	tmp = sprintf(buf, "Triggered [%lu]times :: Last PASR[0x%lx]\n", mtkpasr_triggered, mtkpasr_on);
+	tmp = show_pasr_status(buf);
 	buf += tmp;
 	len += tmp;
 
@@ -391,11 +485,11 @@ static ssize_t execstate_show(struct device *dev, struct device_attribute *attr,
 	return len;
 }
 
-static DEVICE_ATTR(membank, S_IRUGO, membank_show, NULL);
-static DEVICE_ATTR(enable, S_IRUGO | S_IWUSR, enable_show, enable_store);
-static DEVICE_ATTR(mtkpasr_status, S_IRUGO, mtkpasr_status_show, NULL);
-static DEVICE_ATTR(srmask, S_IRUGO | S_IWUSR, srmask_show, srmask_store);
-static DEVICE_ATTR(execstate, S_IRUGO, execstate_show, NULL);
+static DEVICE_ATTR(membank, 0444, membank_show, NULL);
+static DEVICE_ATTR(enable, 0644, enable_show, enable_store);
+static DEVICE_ATTR(mtkpasr_status, 0444, mtkpasr_status_show, NULL);
+static DEVICE_ATTR(srmask, 0644, srmask_show, srmask_store);
+static DEVICE_ATTR(execstate, 0444, execstate_show, NULL);
 
 static struct attribute *mtkpasr_attrs[] = {
 	&dev_attr_membank.attr,
@@ -419,31 +513,36 @@ static int __init mtkpasr_construct_bankrank(void)
 	unsigned long start_pfn, end_pfn;
 
 	/* Init mtkpasr range */
-	start_pfn = memory_lowpower_cma_base() >> PAGE_SHIFT;
-	end_pfn = start_pfn + (memory_lowpower_cma_size() >> PAGE_SHIFT);
+	start_pfn = memory_lowpower_base() >> PAGE_SHIFT;
+	end_pfn = start_pfn + (memory_lowpower_size() >> PAGE_SHIFT);
 	max_bank_pfns = 0;
 	ret = mtkpasr_init_range(start_pfn, end_pfn, &max_bank_pfns);
 	if (ret <= 0 || max_bank_pfns == 0) {
-		MTKPASR_PRINT("%s: failed to init mtkpasr range ret[%d] max_bank_pfns[%lu]\n",
+		MTKPASR_PRINT(
+		"%s: failed to init mtkpasr range ret[%d] max_bank_pfns[%lu]\n",
 				__func__, ret, max_bank_pfns);
 		return -1;
 	}
 
 	/* Allocate buffer for banks */
 	num_banks = ret;
-	mtkpasr_banks = kcalloc(num_banks, sizeof(struct mtkpasr_bank), GFP_KERNEL);
+	mtkpasr_banks = kcalloc(num_banks, sizeof(struct mtkpasr_bank),
+			GFP_KERNEL);
 	if (!mtkpasr_banks) {
-		MTKPASR_PRINT("%s: failed to allocate mtkpasr_banks\n", __func__);
+		MTKPASR_PRINT("%s: failed to allocate mtkpasr_banks\n",
+				__func__);
 		return -1;
 	}
 
 	/* Query bank, rank information */
 	for (i = 0; ; i++) {
-		ret = query_bank_rank_information(i, &start_pfn, &end_pfn, &segn);
+		ret = query_bank_rank_information(i, &start_pfn, &end_pfn,
+				&segn);
 
 		/* No valid bank, just break */
 		if (ret < 0) {
-			MTKPASR_PRINT("%s bank[%d] ret[%d]\n", __func__, i, ret);
+			MTKPASR_PRINT("%s bank[%d] ret[%d]\n",
+					__func__, i, ret);
 			break;
 		}
 
@@ -451,12 +550,14 @@ static int __init mtkpasr_construct_bankrank(void)
 		mtkpasr_banks[i].start_pfn = start_pfn;
 		mtkpasr_banks[i].end_pfn = end_pfn;
 		mtkpasr_banks[i].segment = segn;
-		mtkpasr_banks[i].rank = ret - 1;	/* Minus 1 to indicate which rank */
+		/* Minus 1 to indicate which rank */
+		mtkpasr_banks[i].rank = ret - 1;
 	}
 
 #ifdef CONFIG_MTK_DCS
 	max_channel_num = get_channel_num();
-	mtkpasr_vec = kcalloc(max_channel_num, sizeof(struct pasrvec), GFP_KERNEL);
+	mtkpasr_vec = kcalloc(max_channel_num, sizeof(struct pasrvec),
+			GFP_KERNEL);
 	if (!mtkpasr_vec) {
 		MTKPASR_PRINT("%s: failed to allocate mtkpasr_vec\n", __func__);
 		kfree(mtkpasr_banks);
@@ -466,7 +567,8 @@ static int __init mtkpasr_construct_bankrank(void)
 #endif
 	/* Aligned allocation is preferred */
 	if (i != 0)
-		set_memory_lowpower_aligned(get_order(max_bank_pfns << PAGE_SHIFT));
+		set_memory_lowpower_aligned(
+				get_order(max_bank_pfns << PAGE_SHIFT));
 
 	/* Sanity check */
 	if (i != num_banks)

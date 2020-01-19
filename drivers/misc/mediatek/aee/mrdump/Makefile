@@ -11,20 +11,26 @@
 # See http://www.gnu.org/licenses/gpl-2.0.html for more details.
 #
 
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6570) $(CONFIG_ARCH_MT6757)))
-obj-$(CONFIG_MTK_AEE_FEATURE)	+= mrdump_hw.o
-endif
+subdir-ccflags-y += -Idrivers/misc/mediatek/mtprof/
 
-ifeq ($(CONFIG_MTK_AEE_MRDUMP),y)
-obj-y += mrdump.o
-mrdump-y := mrdump_full.o mrdump_setup.o
-obj-$(CONFIG_ARM) += mrdump_arm.o
-obj-$(CONFIG_ARM64) += mrdump_arm64.o
-endif
+ccflags-$(CONFIG_MTK_AEE_IPANIC) += -DTEXT_OFFSET=$(TEXT_OFFSET)
+obj-$(CONFIG_MTK_AEE_IPANIC)	+= mrdump.o
 
-#MRDUMP_KEY is independent feature
-#it is not depend on MRDUMP
-# obj-$(CONFIG_MTK_AEE_FEATURE) += mrdump_key.o
-# mrdump_key-y := mrdump_key_setup.o
+mrdump-objs-y := \
+	mrdump_control.o \
+	mrdump_hw.o \
+	mrdump_full.o \
+	mrdump_key_setup.o \
+	mrdump_mini.o \
+	mrdump_panic.o
 
-obj-$(CONFIG_MTK_AEE_IPANIC) += mrdump_mini.o mrdump_control.o
+mrdump-objs-$(CONFIG_ARM) += mrdump_arm.o
+mrdump-objs-$(CONFIG_ARM_PSCI) += mrdump_panic_wdt.o
+
+mrdump-objs-$(CONFIG_ARM64) += \
+	mrdump_arm64.o \
+	mrdump_panic_wdt.o
+
+mrdump-objs := $(mrdump-objs-y)
+
+KASAN_SANITIZE := n

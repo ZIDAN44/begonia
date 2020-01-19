@@ -10,8 +10,14 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-
-obj-$(CONFIG_MTK_PWM)	+= mt_pwm.o
-
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6765) $(CONFIG_MACH_MT6761)))
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/pwm/mt6765/include
+obj-y += $(subst ",,mt6765)/
+else
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/pwm/$(CONFIG_MTK_PLATFORM)/include
 obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+endif
+
+obj-$(CONFIG_MTK_PWM)	+= mtk_pwm.o
+
 

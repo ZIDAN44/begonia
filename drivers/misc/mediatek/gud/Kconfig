@@ -13,21 +13,25 @@ config TRUSTONIC_TEE_SUPPORT
 config TRUSTONIC_TEE_VERSION
 	string "TRUSTONIC TEE Version"
 	depends on TRUSTONIC_TEE_SUPPORT
-	default "302c" if (ARCH_MT6570 || ARCH_MT6580)
-	default "302d"
+	default "410" if (MACH_MT6785)
+	default "400b"
 
-#config MT_TRUSTONIC_TEE_DEBUGFS
-#	bool "Enable Trustonic TEE debugfs"
-#	default n
-#	---help---
-#	  Enable Trustonic TEE debugfs
+config TRUSTONIC_TEE_DEBUG
+	bool "Trustonic TEE driver debug mode"
+	depends on (TRUSTONIC_TEE_SUPPORT) && (TRUSTONIC_TEE_VERSION="311c")
+	default n
+	---help---
+	  Enable the debug mode in the Trustonic TEE Driver.
+	  Unlike MOBICORE_DEBUG and MOBICORE_VERBOSE used in TBASE 302 series,
+	  TBASE 311 series use one option to turn on necessary debug logs.
+	  Enable this option for debugging and see more detailed driver flow.
 
 #
 # MobiCore configuration
 #
 config MOBICORE_DRIVER
 	tristate "MobiCore Driver"
-	depends on (TRUSTONIC_TEE_SUPPORT) && (TRUSTONIC_TEE_VERSION="302c" || TRUSTONIC_TEE_VERSION="302d")
+	depends on (TRUSTONIC_TEE_SUPPORT) && (TRUSTONIC_TEE_VERSION="302d")
 	default y
 	---help---
 	  Enable Linux Kernel MobiCore Support
@@ -75,10 +79,25 @@ config TRUSTONIC_TRUSTED_UI
 	  Touch/Display inside TEE, to prevent malicious access of sensitive data
 	  used by APPs like Banking.
 
-# TODO: Obsolete, to-be-removed
-#config TRUSTONIC_TRUSTED_UI_FB_BLANK
-#	bool "<t-base TUI with fb_blank"
-#	depends on TRUSTONIC_TRUSTED_UI
-#	default n
-#	---help---
-#	  Blank the framebuffer before starting a TUI session
+config TRUSTONIC_BIG_CORE_PREFER_BINDING
+	tristate "Big Core Binding"
+	depends on TRUSTONIC_TEE_SUPPORT
+	default y if (MACH_MT6768)
+	---help---
+	  Enable Active Core Binding on Big Core.
+	  This option enables mobicore tee_fastcall thread to bind on big core
+	  to enhance ta/t-driver running performance.
+	  Say Y if you would like to enable this feature.
+	  If unsure, say N.
+
+config TRUSTONIC_RESUME_BIG_CORE_PREFER
+	tristate "Resume To Bind Big Core"
+	depends on TRUSTONIC_BIG_CORE_PREFER_BINDING
+	default y
+	---help---
+	  Enable Active Core Binding on Big Core.
+	  This option enables mobicore tee_fastcall thread to bind on big core
+	  to enhance ta/t-driver running performance.
+	  Say Y if you would like to enable this feature.
+	  If unsure, say N.
+

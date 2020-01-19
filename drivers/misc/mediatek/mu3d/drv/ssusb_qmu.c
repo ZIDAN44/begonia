@@ -23,19 +23,18 @@
 
 /* Sanity CR check in */
 /*
-    1. Find the last gpd HW has executed and update Tx_gpd_last[]
-    2. Set the flag for txstate to know that TX has been completed
-
-    ported from proc_qmu_tx() from test driver.
-
-    caller:qmu_interrupt after getting QMU done interrupt and TX is raised
-
+ *   1. Find the last gpd HW has executed and update Tx_gpd_last[]
+ *   2. Set the flag for txstate to know that TX has been completed
+ *
+ *   ported from proc_qmu_tx() from test driver.
+ *
+ *   caller:qmu_interrupt after getting QMU done interrupt and TX is raised
 */
 void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 {
-	TGPD *gpd = Tx_gpd_last[ep_num];
+	struct TGPD *gpd = Tx_gpd_last[ep_num];
 	/* QMU GPD address --> CPU DMA address */
-	TGPD *gpd_current = (TGPD *) (uintptr_t) (os_readl(USB_QMU_TQCPR(ep_num)));
+	struct TGPD *gpd_current = (struct TGPD *) (uintptr_t) (os_readl(USB_QMU_TQCPR(ep_num)));
 	struct musb_ep *musb_ep = &musb->endpoints[ep_num].ep_in;
 	struct usb_request *request = NULL;
 	struct musb_request *req = NULL;
@@ -45,39 +44,39 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 	gpd_current = gpd_phys_to_virt((void *)gpd_current, USB_TX, ep_num);
 
 	/*
-	   gpd or Last       gdp_current
-	   |                  |
-	   |->  GPD1 --> GPD2 --> GPD3 --> GPD4 --> GPD5 -|
-	   |----------------------------------------------|
+	 *  gpd or Last       gdp_current
+	 *  |                  |
+	 *  |->  GPD1 --> GPD2 --> GPD3 --> GPD4 --> GPD5 -|
+	 *  |----------------------------------------------|
 	 */
 
-	qmu_printk(K_DEBUG, "[TXD]" "%s EP%d, Last=%p, Current=%p, End=%p\n",
+	qmu_printk(K_DEBUG, "[TXD] %s EP %d, Last=%p, Current=%p, End=%p\n",
 		   __func__, ep_num, gpd, gpd_current, Tx_gpd_end[ep_num]);
 
 	/*gpd_current should at least point to the next GPD to the previous last one. */
 	if (gpd == gpd_current) {
 		if (__ratelimit(&ratelimit_tx))
-			qmu_printk(K_ERR, "[TXD]" "%s gpd(%p) == gpd_current(%p)\n", __func__, gpd,
+			qmu_printk(K_ERR, "[TXD] %s gpd(%p) == gpd_current(%p)\n", __func__, gpd,
 			   gpd_current);
 		return;
 	}
 
 	if (TGPD_IS_FLAGS_HWO(gpd)) {
-		qmu_printk(K_DEBUG, "[TXD]" "%s HWO=1, CPR=%x\n", __func__,
+		qmu_printk(K_DEBUG, "[TXD] %s HWO=1, CPR=%x\n", __func__,
 			   os_readl(USB_QMU_TQCPR(ep_num)));
-		BUG_ON(1);
+		WARN_ON(1);
 	}
 
 	while (gpd != gpd_current && !TGPD_IS_FLAGS_HWO(gpd)) {
 #if defined(CONFIG_USB_MU3D_DRV_36BIT)
 		qmu_printk(K_DEBUG,
-			"[TXD]" "gpd=%p ->HWO=%d, BPD=%d, Next_GPD=%lx, DataBuffer=%lx,BufferLen=%d request=%p\n",
+			"[TXD] gpd=%p ->HWO=%d, BPD=%d, Next_GPD=%lx, DataBuffer=%lx,BufferLen=%d request=%p\n",
 			gpd, (u32) TGPD_GET_FLAG(gpd),
 			(u32) TGPD_GET_FORMAT(gpd), (uintptr_t) TGPD_GET_NEXT_TX(gpd),
 			(uintptr_t) TGPD_GET_DATA_TX(gpd), (u32) TGPD_GET_BUF_LEN(gpd), req);
 
 		if (!TGPD_GET_NEXT_TX(gpd)) {
-			qmu_printk(K_ERR, "[TXD][ERROR]" "Next GPD is null!!\n");
+			qmu_printk(K_ERR, "[TXD][ERROR] Next GPD is null!!\n");
 			/* BUG_ON(1); */
 			break;
 		}
@@ -86,13 +85,13 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 
 #else
 		qmu_printk(K_DEBUG,
-			"[TXD]" "gpd=%p ->HWO=%d, BPD=%d, Next_GPD=%lx, DataBuffer=%lx,BufferLen=%d request=%p\n",
+			"[TXD] gpd=%p ->HWO=%d, BPD=%d, Next_GPD=%lx, DataBuffer=%lx,BufferLen=%d request=%p\n",
 			gpd, (u32) TGPD_GET_FLAG(gpd),
 			(u32) TGPD_GET_FORMAT(gpd), (uintptr_t) TGPD_GET_NEXT(gpd),
 			(uintptr_t) TGPD_GET_DATA(gpd), (u32) TGPD_GET_BUF_LEN(gpd), req);
 
 		if (!TGPD_GET_NEXT(gpd)) {
-			qmu_printk(K_ERR, "[TXD][ERROR]" "Next GPD is null!!\n");
+			qmu_printk(K_ERR, "[TXD][ERROR] Next GPD is null!!\n");
 			/* BUG_ON(1); */
 			break;
 		}
@@ -106,7 +105,7 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 		/* trying to give_back the request to gadget driver. */
 		req = next_request(musb_ep);
 		if (!req) {
-			qmu_printk(K_INFO, "[TXD]" "%s Cannot get next request of %d, but QMU has done.\n",
+			qmu_printk(K_INFO, "[TXD] %s Cannot get next request of %d, but QMU has done.\n",
 				   __func__, ep_num);
 			return;
 		}
@@ -121,40 +120,40 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 	}
 
 	if (gpd != gpd_current && TGPD_IS_FLAGS_HWO(gpd)) {
-		qmu_printk(K_ERR, "[TXD][ERROR]" "EP%d TQCSR=%x, TQSAR=%x, TQCPR=%x\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] EP%d TQCSR=%x, TQSAR=%x, TQCPR=%x\n",
 			   ep_num, os_readl(USB_QMU_TQCSR(ep_num)), os_readl(USB_QMU_TQSAR(ep_num)),
 			   os_readl(USB_QMU_TQCPR(ep_num)));
 
-		qmu_printk(K_ERR, "[TXD][ERROR]" "QCR0=%x, QCR1=%x, QCR2=%x, QCR3=%x, QGCSR=%x\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] QCR0=%x, QCR1=%x, QCR2=%x, QCR3=%x, QGCSR=%x\n",
 			   os_readl(U3D_QCR0), os_readl(U3D_QCR1), os_readl(U3D_QCR2),
 			   os_readl(U3D_QCR3), os_readl(U3D_QGCSR));
 #if defined(CONFIG_USB_MU3D_DRV_36BIT)
-		qmu_printk(K_ERR, "[TXD][ERROR]" "HWO=%d, BPD=%d, Next_GPD=%lx\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] HWO=%d, BPD=%d, Next_GPD=%lx\n",
 			   (u32) TGPD_GET_FLAG(gpd),
 			   (u32) TGPD_GET_FORMAT(gpd), (uintptr_t) TGPD_GET_NEXT_TX(gpd));
 
-		qmu_printk(K_ERR, "[TXD][ERROR]" "DataBuffer=%lx, BufferLen=%d, Endpoint=%d\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] DataBuffer=%lx, BufferLen=%d, Endpoint=%d\n",
 			   (uintptr_t) TGPD_GET_DATA_TX(gpd), (u32) TGPD_GET_BUF_LEN(gpd),
 			   (u32) TGPD_GET_EPaddr(gpd));
 #else
-		qmu_printk(K_ERR, "[TXD][ERROR]" "HWO=%d, BPD=%d, Next_GPD=%lx\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] HWO=%d, BPD=%d, Next_GPD=%lx\n",
 			   (u32) TGPD_GET_FLAG(gpd),
 			   (u32) TGPD_GET_FORMAT(gpd), (uintptr_t) TGPD_GET_NEXT(gpd));
 
-		qmu_printk(K_ERR, "[TXD][ERROR]" "DataBuffer=%lx, BufferLen=%d, Endpoint=%d\n",
+		qmu_printk(K_ERR, "[TXD][ERROR] DataBuffer=%lx, BufferLen=%d, Endpoint=%d\n",
 			   (uintptr_t) TGPD_GET_DATA(gpd), (u32) TGPD_GET_BUF_LEN(gpd),
 			   (u32) TGPD_GET_EPaddr(gpd));
 #endif
 	}
 
-	qmu_printk(K_DEBUG, "[TXD]" "%s EP%d, Last=%p, End=%p, complete\n", __func__,
+	qmu_printk(K_DEBUG, "[TXD] %s EP%d, Last=%p, End=%p, complete\n", __func__,
 		   ep_num, Tx_gpd_last[ep_num], Tx_gpd_end[ep_num]);
 
 	if (req != NULL) {
 		if (request->length == 0) {
 			u32 val = 0;
 
-			qmu_printk(K_DEBUG, "[TXD]" "==Send ZLP== %p\n", req);
+			qmu_printk(K_DEBUG, "[TXD] ==Send ZLP== %p\n", req);
 
 			if (wait_for_value_us
 			    (USB_END_OFFSET(req->epnum, U3D_TX1CSR0), TX_FIFOEMPTY, TX_FIFOEMPTY, 1,
@@ -170,18 +169,18 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 			/*Disable Tx_DMAREQEN */
 			val = USB_ReadCsr32(U3D_TX1CSR0, req->epnum) & ~TX_DMAREQEN;
 
-			mb();
+			mb();	/* avoid context swtich */
 
 			USB_WriteCsr32(U3D_TX1CSR0, req->epnum, val);
 
 			val = USB_ReadCsr32(U3D_TX1CSR0, req->epnum) | TX_TXPKTRDY;
 
-			mb();
+			mb();	/* avoid context swtich */
 
 			USB_WriteCsr32(U3D_TX1CSR0, req->epnum, val);
 
 			qmu_printk(K_DEBUG,
-				   "[TXD]" "Giveback ZLP of EP%d, actual:%d, length:%d %p\n",
+				   "[TXD] Giveback ZLP of EP%d, actual:%d, length:%d %p\n",
 				   req->epnum, request->actual, request->length, request);
 
 			musb_g_giveback(musb_ep, request, 0);
@@ -190,21 +189,21 @@ void qmu_done_tx(struct musb *musb, u8 ep_num, unsigned long flags)
 }
 
 /*
-   When receiving RXQ done interrupt, qmu_interrupt calls this function.
-
-   1. Traverse GPD/BD data structures to count actual transferred length.
-   2. Set the done flag to notify rxstate_qmu() to report status to upper gadget driver.
-
-    ported from proc_qmu_rx() from test driver.
-
-    caller:qmu_interrupt after getting QMU done interrupt and TX is raised
-
+ *   When receiving RXQ done interrupt, qmu_interrupt calls this function.
+ *
+ *  1. Traverse GPD/BD data structures to count actual transferred length.
+ *  2. Set the done flag to notify rxstate_qmu() to report status to upper gadget driver.
+ *
+ *   ported from proc_qmu_rx() from test driver.
+ *
+ *   caller:qmu_interrupt after getting QMU done interrupt and TX is raised
+ *
 */
 void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 {
-	TGPD *gpd = Rx_gpd_last[ep_num];
+	struct TGPD *gpd = Rx_gpd_last[ep_num];
 	/* QMU GPD address --> CPU DMA address */
-	TGPD *gpd_current = (TGPD *) (uintptr_t) (os_readl(USB_QMU_RQCPR(ep_num)));
+	struct TGPD *gpd_current = (struct TGPD *) (uintptr_t) (os_readl(USB_QMU_RQCPR(ep_num)));
 	struct musb_ep *musb_ep = &musb->endpoints[ep_num].ep_out;
 	struct usb_request *request = NULL;
 	struct musb_request *req;
@@ -213,7 +212,7 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 	/* trying to give_back the request to gadget driver. */
 	req = next_request(musb_ep);
 	if (!req) {
-		qmu_printk(K_ERR, "[RXD]" "%s Cannot get next request of %d, but QMU has done.\n",
+		qmu_printk(K_ERR, "[RXD] %s Cannot get next request of %d, but QMU has done.\n",
 			   __func__, ep_num);
 		return;
 	}
@@ -223,13 +222,13 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 	/*Transfer PHY addr got from QMU register to VIR addr */
 	gpd_current = gpd_phys_to_virt(gpd_current, USB_RX, ep_num);
 
-	qmu_printk(K_DEBUG, "[RXD]" "%s EP%d, Last=%p, Current=%p, End=%p\n",
+	qmu_printk(K_DEBUG, "[RXD] %s EP%d, Last=%p, Current=%p, End=%p\n",
 		   __func__, ep_num, gpd, gpd_current, Rx_gpd_end[ep_num]);
 
 	/*gpd_current should at least point to the next GPD to the previous last one. */
 	if (gpd == gpd_current) {
 		if (__ratelimit(&ratelimit_rx)) {
-			qmu_printk(K_ERR, "[RXD][ERROR]" "%s gpd(%p) == gpd_current(%p)\n", __func__, gpd,
+			qmu_printk(K_ERR, "[RXD][ERROR] %s gpd(%p) == gpd_current(%p)\n", __func__, gpd,
 				   gpd_current);
 			qmu_printk(K_ERR, "[RXD][ERROR] EP%d RQCSR=%x, RQSAR=%x, RQCPR=%x, RQLDPR=%x\n",
 				   ep_num, os_readl(USB_QMU_RQCSR(ep_num)), os_readl(USB_QMU_RQSAR(ep_num)),
@@ -254,7 +253,7 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 
 	if (!gpd || !gpd_current) {
 		qmu_printk(K_ERR,
-		   "[RXD][ERROR]" "%s EP%d, gpd=%p, gpd_current=%p, ishwo=%d, rx_gpd_last=%p, RQCPR=0x%x\n",
+		   "[RXD][ERROR] %s EP%d, gpd=%p, gpd_current=%p, ishwo=%d, rx_gpd_last=%p, RQCPR=0x%x\n",
 		   __func__, ep_num, gpd, gpd_current,
 		   ((gpd == NULL) ? 999 : TGPD_IS_FLAGS_HWO(gpd)),
 		   Rx_gpd_last[ep_num],
@@ -263,49 +262,42 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 	}
 
 	if (TGPD_IS_FLAGS_HWO(gpd)) {
-		qmu_printk(K_ERR, "[RXD][ERROR]" "HWO=1!!\n");
-		BUG_ON(1);
+		qmu_printk(K_ERR, "[RXD][ERROR] HWO=1!!\n");
+		WARN_ON(1);
+		goto exit;
 	}
 
 	while (gpd != gpd_current && !TGPD_IS_FLAGS_HWO(gpd)) {
-		DEV_UINT32 rcv_len = (DEV_UINT32) TGPD_GET_BUF_LEN(gpd);
-		DEV_UINT32 buf_len = (DEV_UINT32) TGPD_GET_DataBUF_LEN(gpd);
+		unsigned int rcv_len = (unsigned int) TGPD_GET_BUF_LEN(gpd);
+		unsigned int buf_len = (unsigned int) TGPD_GET_DataBUF_LEN(gpd);
 
 		if (rcv_len > buf_len)
-			qmu_printk(K_ERR, "[RXD][ERROR]" "%s rcv(%d) > buf(%d) AUK!?\n", __func__,
+			qmu_printk(K_ERR, "[RXD][ERROR] %s rcv(%d) > buf(%d) AUK!?\n", __func__,
 				   rcv_len, buf_len);
 #if defined(CONFIG_USB_MU3D_DRV_36BIT)
 		qmu_printk(K_DEBUG,
-			   "[RXD]" "gpd=%p ->HWO=%d, Next_GPD=%p, RcvLen=%d, BufLen=%d, pBuf=%p\n",
+			   "[RXD] gpd=%p ->HWO=%d, Next_GPD=%p, RcvLen=%d, BufLen=%d, pBuf=%p\n",
 			   gpd, TGPD_GET_FLAG(gpd), TGPD_GET_NEXT_RX(gpd), rcv_len, buf_len,
 			   TGPD_GET_DATA_RX(gpd));
 #else
 		qmu_printk(K_DEBUG,
-			   "[RXD]" "gpd=%p ->HWO=%d, Next_GPD=%p, RcvLen=%d, BufLen=%d, pBuf=%p\n",
+			   "[RXD] gpd=%p ->HWO=%d, Next_GPD=%p, RcvLen=%d, BufLen=%d, pBuf=%p\n",
 			   gpd, TGPD_GET_FLAG(gpd), TGPD_GET_NEXT(gpd), rcv_len, buf_len,
 			   TGPD_GET_DATA(gpd));
 #endif
-		if (!request) {
-			qmu_printk(K_ERR, "[RXD]" "%s Next request of %d is NULL pointer.\n",
-				   __func__, ep_num);
-			BUG_ON(1);
-			return;
-		}
-		request->actual += rcv_len;
-
 #if defined(CONFIG_USB_MU3D_DRV_36BIT)
 		if (!TGPD_GET_NEXT_RX(gpd) || !TGPD_GET_DATA_RX(gpd)) {
-			qmu_printk(K_ERR, "[RXD][ERROR]" "%s EP%d ,gpd=%p\n", __func__, ep_num,
+			qmu_printk(K_WARNIN, "[RXD][WARN] %s EP%d ,gpd=%p\n", __func__, ep_num,
 				   gpd);
-			BUG_ON(1);
+			goto exit;
 		}
 
 		gpd = TGPD_GET_NEXT_RX(gpd);
 #else
 		if (!TGPD_GET_NEXT(gpd) || !TGPD_GET_DATA(gpd)) {
-			qmu_printk(K_ERR, "[RXD][ERROR]" "%s EP%d ,gpd=%p\n", __func__, ep_num,
+			qmu_printk(K_WARNIN, "[RXD][WARN] %s EP%d ,gpd=%p\n", __func__, ep_num,
 				   gpd);
-			BUG_ON(1);
+			goto exit;
 		}
 
 		gpd = TGPD_GET_NEXT(gpd);
@@ -313,11 +305,13 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 		gpd = gpd_phys_to_virt(gpd, USB_RX, ep_num);
 
 		if (!gpd) {
-			qmu_printk(K_ERR, "[RXD][ERROR]" "%s EP%d ,gpd=%p\n", __func__, ep_num,
+			qmu_printk(K_ERR, "[RXD][ERROR] %s EP%d ,gpd=%p\n", __func__, ep_num,
 				   gpd);
-			BUG_ON(1);
+			WARN_ON(1);
+			goto exit;
 		}
 
+		request->actual += rcv_len;
 		Rx_gpd_last[ep_num] = gpd;
 		musb_g_giveback(musb_ep, request, 0);
 		req = next_request(musb_ep);
@@ -325,13 +319,13 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 	}
 
 	if (gpd != gpd_current && TGPD_IS_FLAGS_HWO(gpd)) {
-		qmu_printk(K_ERR, "[RXD][ERROR]" "gpd=%p\n", gpd);
+		qmu_printk(K_ERR, "[RXD][ERROR] gpd=%p\n", gpd);
 
-		qmu_printk(K_ERR, "[RXD][ERROR]" "EP%d RQCSR=%x, RQSAR=%x, RQCPR=%x, RQLDPR=%x\n",
+		qmu_printk(K_ERR, "[RXD][ERROR] EP%d RQCSR=%x, RQSAR=%x, RQCPR=%x, RQLDPR=%x\n",
 			   ep_num, os_readl(USB_QMU_RQCSR(ep_num)), os_readl(USB_QMU_RQSAR(ep_num)),
 			   os_readl(USB_QMU_RQCPR(ep_num)), os_readl(USB_QMU_RQLDPR(ep_num)));
 
-		qmu_printk(K_ERR, "[RXD][ERROR]" "QCR0=%x, QCR1=%x, QCR2=%x, QCR3=%x, QGCSR=%x\n",
+		qmu_printk(K_ERR, "[RXD][ERROR] QCR0=%x, QCR1=%x, QCR2=%x, QCR3=%x, QGCSR=%x\n",
 			   os_readl(U3D_QCR0), os_readl(U3D_QCR1), os_readl(U3D_QCR2),
 			   os_readl(U3D_QCR3), os_readl(U3D_QGCSR));
 #if defined(CONFIG_USB_MU3D_DRV_36BIT)
@@ -347,8 +341,8 @@ void qmu_done_rx(struct musb *musb, u8 ep_num, unsigned long flags)
 		qmu_printk(K_INFO, "[RXD][ERROR] RecvLen=%d, Endpoint=%d\n",
 			   (u32) TGPD_GET_BUF_LEN(gpd), (u32) TGPD_GET_EPaddr(gpd));
 	}
-
-	qmu_printk(K_DEBUG, "[RXD]" "%s EP%d, Last=%p, End=%p, complete\n", __func__,
+exit:
+	qmu_printk(K_DEBUG, "[RXD] %s EP%d, Last=%p, End=%p, complete\n", __func__,
 		   ep_num, Rx_gpd_last[ep_num], Rx_gpd_end[ep_num]);
 }
 
@@ -378,7 +372,7 @@ void qmu_error_recovery(unsigned long data)
 {
 #ifdef USE_SSUSB_QMU
 	u8 ep_num;
-	USB_DIR dir;
+	enum USB_DIR dir;
 	unsigned long flags;
 	struct musb *musb = (struct musb *)data;
 	struct musb_ep *musb_ep;
@@ -440,12 +434,12 @@ void qmu_error_recovery(unsigned long data)
 		musb_ep = &musb->endpoints[ep_num].ep_out;
 
 	list_for_each_entry(request, &musb_ep->req_list, list) {
-		qmu_printk(K_ERR, "%s : request 0x%p length(0x%d)\n", __func__, request,
+		qmu_printk(K_ERR, "%s : request 0x%p length(%d)\n", __func__, request,
 			   request->request.length);
 
 		if (request->request.dma != DMA_ADDR_INVALID) {
 			if (request->tx) {
-				qmu_printk(K_ERR, "[TX]" "%s gpd=%p, epnum=%d, len=%d\n", __func__,
+				qmu_printk(K_ERR, "[TX] %s gpd=%p, epnum=%d, len=%d\n", __func__,
 					   Tx_gpd_end[ep_num], ep_num, request->request.length);
 				request->request.actual = request->request.length;
 				if (request->request.length > 0) {
@@ -482,15 +476,15 @@ void qmu_error_recovery(unsigned long data)
 					    USB_ReadCsr32(U3D_TX1CSR0,
 							  request->epnum) | TX_DMAREQEN;
 
-					mb();
+					mb();	/* avoid context swtich */
 
 					USB_WriteCsr32(U3D_TX1CSR0, request->epnum, txcsr);
 
 				} else if (request->request.length == 0) {
-					qmu_printk(K_DEBUG, "[TX]" "Send ZLP\n");
+					qmu_printk(K_DEBUG, "[TX] Send ZLP\n");
 				}
 			} else {
-				qmu_printk(K_ERR, "[RX]" "%s, gpd=%p, epnum=%d, len=%d\n",
+				qmu_printk(K_ERR, "[RX] %s, gpd=%p, epnum=%d, len=%d\n",
 					   __func__, Rx_gpd_end[ep_num], ep_num,
 					   request->request.length);
 				if (is_len_err == true) {
@@ -523,7 +517,7 @@ done:
 #endif
 }
 
-void qmu_exception_interrupt(struct musb *musb, DEV_UINT32 wQmuVal)
+void qmu_exception_interrupt(struct musb *musb, unsigned int wQmuVal)
 {
 	u32 wErrVal;
 	int i = (int)wQmuVal;
@@ -585,7 +579,7 @@ void qmu_exception_interrupt(struct musb *musb, DEV_UINT32 wQmuVal)
 	}
 
 	if ((wQmuVal & RXQ_EMPTY_INT) || (wQmuVal & TXQ_EMPTY_INT)) {
-		DEV_UINT32 wEmptyVal = os_readl(U3D_QEMIR);
+		unsigned int wEmptyVal = os_readl(U3D_QEMIR);
 
 		qmu_printk(K_DEBUG, "%s Empty in QMU mode![0x%x]\r\n",
 			   (wQmuVal & TXQ_EMPTY_INT) ? "TX" : "RX", wEmptyVal);

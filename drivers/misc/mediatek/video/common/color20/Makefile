@@ -13,32 +13,30 @@
 
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/include/ \
              -I$(srctree)/drivers/misc/mediatek/video/common/ \
-             -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/ \
              -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/ \
-             -I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
-             -I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/ \
              -I$(srctree)/drivers/misc/mediatek/base/power/mt6755/ \
              -I$(srctree)/drivers/misc/mediatek/lcm/inc \
              -I$(srctree)/drivers/misc/mediatek/m4u/$(MTK_PLATFORM)/ \
              -I$(srctree)/drivers/misc/mediatek/mmp/
 
-ifeq ($(CONFIG_ARCH_MT6735),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6735/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6735/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6735/
-endif
-ifeq ($(CONFIG_ARCH_MT6735M),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6735m/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6735m/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6735m/
-endif
-ifeq ($(CONFIG_ARCH_MT6753),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6753/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6753/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6753/
-endif
-
 ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6763) $(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT6759) \
+					 $(CONFIG_MACH_MT6758) $(CONFIG_MACH_MT6739) $(CONFIG_MACH_MT6765) \
+					 $(CONFIG_MACH_MT6761) $(CONFIG_MACH_MT3967) $(CONFIG_MACH_MT6785)))
+ccflags-y += \
+		-I$(srctree)/drivers/misc/mediatek/cmdq/v3/
+
+ifeq ($(CONFIG_MACH_MT6761),y)
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3/mt6765/
+else
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/cmdq/v3/$(MTK_PLATFORM)/
+endif
+else
+ccflags-y += \
+		-I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
+		-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/
+endif
 
 obj-y += ddp_color.o
 
@@ -48,8 +46,42 @@ else ifeq ($(strip $(CONFIG_MTK_PQ_COLOR_MODE)),"OFF")
     ccflags-y += -DDISP_COLOR_OFF
 endif
 
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6755) $(CONFIG_ARCH_MT6797)))
+ifneq (y, $(filter y, $(CONFIG_MACH_MT6580) $(CONFIG_MACH_MT6570)))
     ccflags-y += -DCCORR_SUPPORT
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6797) $(CONFIG_MACH_MT6757) \
+	$(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT6759) $(CONFIG_MACH_MT6763) \
+	$(CONFIG_MACH_MT6758) $(CONFIG_MACH_MT6771) $(CONFIG_MACH_MT6775) \
+	$(CONFIG_MACH_MT3967) $(CONFIG_MACH_MT6785)))
+    ccflags-y += -DCOLOR_2_1
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6757) $(CONFIG_MACH_MT6759) \
+	$(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT6763) $(CONFIG_MACH_MT6758) \
+	$(CONFIG_MACH_MT6771) $(CONFIG_MACH_MT6775) $(CONFIG_MACH_MT3967) $(CONFIG_MACH_MT6785)))
+    ccflags-y += -DCOLOR_3_0
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT3967) $(CONFIG_MACH_MT6785)))
+    ccflags-y += -DSUPPORT_HDR
+    ifeq (y, $(filter y, $(CONFIG_MACH_MT6799)))
+        ccflags-y += -DHDR_IN_RDMA
+    endif
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6771) $(CONFIG_MACH_MT6775) $(CONFIG_MACH_MT6785)))
+    ccflags-y += -DSUPPORT_MDP_AAL
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6765) $(CONFIG_MACH_MT6761)))
+    ccflags-y += -DSUPPORT_WCG
+endif
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6797) $(CONFIG_MACH_MT6799) \
+	$(CONFIG_MACH_MT6763) $(CONFIG_MACH_MT6758) $(CONFIG_MACH_MT6771) \
+	$(CONFIG_MACH_MT6775)))
+    ccflags-y += -DSUPPORT_ULTRA_RESOLUTION
 endif
 
 ifeq ($(strip $(CONFIG_MTK_PQ_COLOR_MODE)),"MDP")
@@ -62,6 +94,8 @@ endif
 
 ifeq ($(strip $(CONFIG_MTK_LCM_PHYSICAL_ROTATION)),"180")
     ccflags-y += -DLCM_PHYSICAL_ROTATION_180
+else ifeq ($(strip $(CONFIG_MTK_LCM_PHYSICAL_ROTATION)),"270")
+    ccflags-y += -DLCM_PHYSICAL_ROTATION_270
 else ifeq ($(strip $(CONFIG_MTK_LCM_PHYSICAL_ROTATION_HW)),y)
     ccflags-y += -DLCM_PHYSICAL_ROTATION_180
 endif

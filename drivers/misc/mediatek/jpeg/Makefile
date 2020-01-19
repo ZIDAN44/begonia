@@ -14,28 +14,8 @@
 # drivers/image/jpeg/Makefile
 
 # use common driver
-ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6735" "mt6753" "mt6755" "mt6595" "mt6752" "mt6795" "mt6797" "mt8173"))
+ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6757" "mt6799" "kiboplus" "mt6759" "mt6763" "mt6758" "mt6739" "mt6765" "mt6761" "mt8163" "mt8173" "mt6779" "mt6768" "mt6767" "mt6785" ))
   # new chip use v2 driver
   obj-y += v2/
-else
-  # legacy chip use v1 driver
-  ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt6582" "mt6592"))
-    obj-y += v1/
-  else
-     ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt8163"))
-       obj-y += mt8163/
-     else
-      ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt8127"))
-       obj-y += mt8127/
-      else
-       ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt7623"))
-       obj-y += mt7623/
-       endif
-        ifneq (,$(filter $(CONFIG_MTK_PLATFORM), "mt8167"))
-        obj-y += mt8167/
-        endif
-      endif
-     endif
-  endif
 endif
 # EOF

@@ -1,18 +1,20 @@
 /*
-* Copyright (C) 2016 MediaTek Inc.
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
-*/
+ * Copyright (C) 2015 MediaTek Inc.
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+ * GNU General Public License for more details.
+ */
 
 #ifndef __HW_BREAKPOINT_64_H
 #define __HW_BREAKPOINT_64_H
-#include <asm/io.h>
-#include <mt-plat/mt_io.h>
+#include <linux/io.h>
+#include <mt-plat/mtk_io.h>
 #include <mt-plat/sync_write.h>
 #include <mt-plat/hw_watchpoint.h>
 
@@ -38,6 +40,7 @@ struct wp_trace_context_t {
 struct dbgreg_set {
 	unsigned long regs[28];
 };
+#define DBGEDSCR	regs[23]
 #define SDSR            regs[22]
 #define DBGVCR          regs[21]
 #define DBGWCR3         regs[20]
@@ -62,17 +65,10 @@ struct dbgreg_set {
 #define DBGBVR0		regs[1]
 #define DBGDSCRext	regs[0]
 
-#if defined(CONFIG_ARCH_MT6580) || defined(CONFIG_ARCH_MT6570) /* For armv7 */
-#define DBGWVR 0x180
-#define DBGWCR 0x1C0
-#define DBGBVR 0x100
-#define DBGBCR 0x140
-#else
 #define DBGWVR 0x800
 #define DBGWCR 0x808
 #define DBGBVR 0x400
 #define DBGBCR 0x408
-#endif
 
 #define EDSCR  0x088
 #define EDLAR 0xFB0
@@ -84,7 +80,8 @@ struct dbgreg_set {
 #define MDBGEN (1 << 15)
 #define KDE (0x1 << 13)
 #define DBGWCR_VAL 0x000001E7
- /**/
+#define TDCC (1 << 12)
+
 #define WP_EN (1 << 0)
 #define LSC_LDR (1 << 3)
 #define LSC_STR (2 << 3)
@@ -97,11 +94,13 @@ struct dbgreg_set {
 #define dbg_mem_read_64(addr)		readq(IOMEM(addr))
 #define dbg_mem_write(addr, val)    mt_reg_sync_writel(val, addr)
 #define dbg_reg_copy(offset, base_to, base_from)   \
-	dbg_mem_write((base_to) + (offset), dbg_mem_read((base_from) + (offset)))
+	dbg_mem_write((base_to) + (offset), \
+	dbg_mem_read((base_from) + (offset)))
 #ifdef CONFIG_ARM64	/* For AARCH64 */
 #define dbg_mem_write_64(addr, val)    mt_reg_sync_writeq(val, addr)
 #define dbg_reg_copy_64(offset, base_to, base_from)   \
-	dbg_mem_write_64((base_to) + (offset), dbg_mem_read_64((base_from) + (offset)))
+	dbg_mem_write_64((base_to) + (offset), \
+	dbg_mem_read_64((base_from) + (offset)))
 #define ARM_DBG_READ(N, M, OP2, VAL) {\
 	asm volatile("mrc p14, 0, %0, " #N "," #M ", " #OP2 : "=r" (VAL));\
 }
@@ -109,13 +108,16 @@ struct dbgreg_set {
 	asm volatile("mcr p14, 0, %0, " #N "," #M ", " #OP2 : : "r" (VAL));\
 }
 #endif
+
+#define IO_VIRT_TO_PHYS(v) (0x10000000 | ((v) & 0x0fffffff))
 static inline void cs_cpu_write(void __iomem *addr_base, u32 offset, u32 wdata)
 {
 	/* TINFO="Write addr %h, with data %h", addr_base+offset, wdata */
 	mt_reg_sync_writel(wdata, addr_base + offset);
 }
 
-static inline unsigned int cs_cpu_read(const void __iomem *addr_base, u32 offset)
+static inline unsigned int cs_cpu_read(const void __iomem *addr_base,
+	u32 offset)
 {
 	u32 actual;
 
@@ -126,13 +128,15 @@ static inline unsigned int cs_cpu_read(const void __iomem *addr_base, u32 offset
 }
 
 #ifdef CONFIG_ARM64
-static inline void cs_cpu_write_64(void __iomem *addr_base, u64 offset, u64 wdata)
+static inline void cs_cpu_write_64(void __iomem *addr_base, u64 offset,
+	u64 wdata)
 {
 	/* TINFO="Write addr %h, with data %h", addr_base+offset, wdata */
 	mt_reg_sync_writeq(wdata, addr_base + offset);
 }
 
-static inline unsigned long cs_cpu_read_64(const void __iomem *addr_base, u64 offset)
+static inline unsigned long cs_cpu_read_64(const void __iomem *addr_base,
+	u64 offset)
 {
 	u64 actual;
 
@@ -153,6 +157,6 @@ void smp_read_OSLSR_EL1_callback(void *info);
 int register_wp_context(struct wp_trace_context_t **wp_tracer_context);
 void __iomem *get_wp_base(void);
 
-extern unsigned read_clusterid(void);
-
+extern unsigned int read_clusterid(void);
+extern struct notifier_block cpu_nfb;
 #endif				/* !__HW_BREAKPOINT_64_H */

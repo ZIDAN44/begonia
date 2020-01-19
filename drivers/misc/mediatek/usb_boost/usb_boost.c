@@ -79,6 +79,7 @@ enum{
 static char *type_name[_TYPE_MAXID] = {
 	"cpu_freq",
 	"cpu_core",
+	"dram_vcore",
 };
 #define MAX_LEN_WQ_NAME 32
 static int trigger_cnt_disabled;
@@ -87,9 +88,10 @@ static int inited;
 static struct class *usb_boost_class;
 static int cpu_freq_dft_para[_ATTR_PARA_RW_MAXID] = {1, 3, 300, 0};
 static int cpu_core_dft_para[_ATTR_PARA_RW_MAXID] = {1, 3, 300, 0};
+static int dram_vcore_dft_para[_ATTR_PARA_RW_MAXID] = {1, 3, 300, 0};
 static void __usb_boost_empty(void) { return; }
 static void __usb_boost_cnt(void) { trigger_cnt_disabled++; return; }
-static void __usb_boost_by_id_empty(int id) { return; }
+static void __usb_boost_id_empty(int id) { return; }
 static void __request_empty(int id) { return; }
 
 struct boost_ops {
@@ -100,12 +102,15 @@ struct boost_ops {
 
 struct boost_ops __the_boost_ops = {
 	__usb_boost_empty,
-	{__usb_boost_by_id_empty,
-	 __usb_boost_by_id_empty} };
+	{__usb_boost_id_empty,
+	 __usb_boost_id_empty,
+	 __usb_boost_id_empty} };
 
 /* -1 denote not used*/
 static struct act_arg_obj cpu_freq_dft_arg = {1000000000, -1, -1};
 static struct act_arg_obj cpu_core_dft_arg = {2, -1, -1};
+static struct act_arg_obj dram_vcore_dft_arg = {-1, -1, -1};
+
 static int test_diff_sec, test_diff_usec;
 
 struct control_ops {
@@ -124,7 +129,7 @@ static struct mtk_usb_boost {
 	struct timeval tv_ref_time;
 	int work_cnt;
 	struct act_arg_obj act_arg;
-	void (*request_func)(int);
+	void (*request_func)(int id);
 } boost_inst[_TYPE_MAXID];
 
 static int update_time(int id);
@@ -132,7 +137,8 @@ static bool check_timeout(int id);
 static void __usb_boost_by_id(int id);
 
 /* public to IP platform level */
-void usb_boost_set_para_and_arg(int id, int *para, int para_range, struct act_arg_obj *act_arg)
+void usb_boost_set_para_and_arg(int id, int *para, int para_range,
+	struct act_arg_obj *act_arg)
 {
 	int i;
 	struct mtk_usb_boost *ptr_inst = &boost_inst[id];
@@ -140,8 +146,9 @@ void usb_boost_set_para_and_arg(int id, int *para, int para_range, struct act_ar
 
 	USB_BOOST_NOTICE("para_range:<%d>\n", para_range);
 	if (para_range > _ATTR_PARA_RW_MAXID) {
-		USB_BOOST_NOTICE("ERROR, over range !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n");
-		USB_BOOST_NOTICE("para_range<%d>, _ATTR_PARA_RW_MAXID<%d>\n", para_range, _ATTR_PARA_RW_MAXID);
+		USB_BOOST_NOTICE("ERROR, over range !!!!!\n");
+		USB_BOOST_NOTICE("para_range<%d>, _ATTR_PARA_RW_MAXID<%d>\n",
+			para_range, _ATTR_PARA_RW_MAXID);
 		return;
 	}
 
@@ -156,7 +163,7 @@ void usb_boost_set_para_and_arg(int id, int *para, int para_range, struct act_ar
 	if (para[0])
 		__the_boost_ops.boost_by_id[id] = __usb_boost_by_id;
 	else
-		__the_boost_ops.boost_by_id[id] = __usb_boost_by_id_empty;
+		__the_boost_ops.boost_by_id[id] = __usb_boost_id_empty;
 }
 
 void usb_boost(void)
@@ -169,14 +176,17 @@ void usb_boost_by_id(int id)
 	__the_boost_ops.boost_by_id[id](id);
 }
 
-void register_usb_boost_act(int type_id, int action_id, int (*func) (struct act_arg_obj *arg))
+void register_usb_boost_act(int type_id, int action_id,
+	int (*func)(struct act_arg_obj *arg))
 {
 	boost_inst[type_id].ops.act[action_id] = func;
 }
 
 static void __request_it(int id)
 {
-	USB_BOOST_DBG("ID<%d>, WQ<%p>, WORK<%p>\n", id, boost_inst[id].wq, &(boost_inst[id].work));
+	USB_BOOST_DBG("ID<%d>, WQ<%p>, WORK<%p>\n",
+		id, boost_inst[id].wq, &(boost_inst[id].work));
+
 	queue_work(boost_inst[id].wq, &(boost_inst[id].work));
 	USB_BOOST_DBG("\n");
 }
@@ -198,8 +208,10 @@ static void __usb_boost(void)
 
 static void __boost_act(int type_id, int action_id)
 {
-	int (*func)(struct act_arg_obj *arg) = boost_inst[type_id].ops.act[action_id];
+	int (*func)(struct act_arg_obj *arg);
 	struct act_arg_obj *arg = &boost_inst[type_id].act_arg;
+
+	func = boost_inst[type_id].ops.act[action_id];
 
 	if (func)
 		func(arg);
@@ -212,27 +224,37 @@ static void dump_info(int id)
 	int *ptr_para = ptr_inst->para;
 
 	/* PARA */
-	for (n = 0; n < _ATTR_PARA_RW_MAXID; n++, ptr_para++)
-		USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[n], *ptr_para);
-
+	for (n = 0; n < _ATTR_PARA_RW_MAXID; n++, ptr_para++) {
+		USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+			id, attr_name[n], *ptr_para);
+	}
 	/* RO */
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d,%d>\n", id, attr_name[ATTR_RO_REF_TIME],
-			(unsigned int)boost_inst[id].tv_ref_time.tv_sec,
-			(unsigned int)boost_inst[id].tv_ref_time.tv_usec);
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[ATTR_RO_IS_RUNNING], boost_inst[id].is_running);
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[ATTR_RO_WORK_CNT], boost_inst[id].work_cnt);
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d,%d>\n",
+		id,	attr_name[ATTR_RO_REF_TIME],
+		(unsigned int)boost_inst[id].tv_ref_time.tv_sec,
+		(unsigned int)boost_inst[id].tv_ref_time.tv_usec);
+
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+		id, attr_name[ATTR_RO_IS_RUNNING], boost_inst[id].is_running);
+
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+		id, attr_name[ATTR_RO_WORK_CNT], boost_inst[id].work_cnt);
 
 	/* ARG */
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[ATTR_ARG1], boost_inst[id].act_arg.arg1);
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[ATTR_ARG2], boost_inst[id].act_arg.arg2);
-	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n", id, attr_name[ATTR_ARG3], boost_inst[id].act_arg.arg3);
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+		id, attr_name[ATTR_ARG1], boost_inst[id].act_arg.arg1);
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+		id, attr_name[ATTR_ARG2], boost_inst[id].act_arg.arg2);
+	USB_BOOST_NOTICE("id<%d>, attr<%s>, val<%d>\n",
+		id, attr_name[ATTR_ARG3], boost_inst[id].act_arg.arg3);
 
 }
 static int update_time(int id)
 {
 	do_gettimeofday(&boost_inst[id].tv_ref_time);
-	USB_BOOST_DBG("id:%d, ref<%d,%d>\n",
-			id, (int)boost_inst[id].tv_ref_time.tv_sec, (int)boost_inst[id].tv_ref_time.tv_usec);
+	USB_BOOST_DBG("id:%d, ref<%d,%d>\n", id,
+		(int)boost_inst[id].tv_ref_time.tv_sec,
+		(int)boost_inst[id].tv_ref_time.tv_usec);
 	return 1;
 }
 
@@ -246,17 +268,21 @@ static bool check_timeout(int id)
 	diff_sec = tv.tv_sec - ref->tv_sec;
 	if (diff_sec >= boost_inst[id].para[ATTR_TIMEOUT]) {
 		USB_BOOST_DBG("id<%d>, cur<%d,%d>, ref<%d,%d>\n",
-				id, (int)tv.tv_sec, (int)tv.tv_usec, (int)ref->tv_sec, (int)ref->tv_usec);
+				id, (int)tv.tv_sec, (int)tv.tv_usec,
+				(int)ref->tv_sec, (int)ref->tv_usec);
 		return true;
 	}
 	USB_BOOST_DBG("id<%d>, cur<%d,%d>, ref<%d,%d>\n",
-			id, (int)tv.tv_sec, (int)tv.tv_usec, (int)ref->tv_sec, (int)ref->tv_usec);
+			id, (int)tv.tv_sec, (int)tv.tv_usec,
+			(int)ref->tv_sec, (int)ref->tv_usec);
+
 	return false;
 }
 
 static void boost_work(struct work_struct *work_struct)
 {
-	struct mtk_usb_boost *ptr_inst = container_of(work_struct, struct mtk_usb_boost, work);
+	struct mtk_usb_boost *ptr_inst =
+		container_of(work_struct, struct mtk_usb_boost, work);
 	int id = ptr_inst->id;
 	int raw = ptr_inst->para[ATTR_RAW];
 	int poll_intval = ptr_inst->para[ATTR_POLLING_INTVAL];
@@ -272,7 +298,7 @@ static void boost_work(struct work_struct *work_struct)
 	while (1) {
 		int timeout;
 
-		USB_BOOST_NOTICE("id:%d, running of work\n", id);
+		USB_BOOST_DBG("id:%d, running of work\n", id);
 		if (!ptr_inst->para[ATTR_ENABLE]) {
 			/* dump_info(id); */
 			break;
@@ -301,9 +327,13 @@ static void boost_work(struct work_struct *work_struct)
 static void default_setting(void)
 {
 	usb_boost_set_para_and_arg(TYPE_CPU_FREQ, cpu_freq_dft_para,
-			sizeof(cpu_freq_dft_para)/sizeof(int), &cpu_freq_dft_arg);
+			ARRAY_SIZE(cpu_freq_dft_para), &cpu_freq_dft_arg);
+
 	usb_boost_set_para_and_arg(TYPE_CPU_CORE, cpu_core_dft_para,
-			sizeof(cpu_core_dft_para)/sizeof(int), &cpu_core_dft_arg);
+			ARRAY_SIZE(cpu_core_dft_para), &cpu_core_dft_arg);
+
+	usb_boost_set_para_and_arg(TYPE_DRAM_VCORE, dram_vcore_dft_para,
+			ARRAY_SIZE(dram_vcore_dft_para), &dram_vcore_dft_arg);
 }
 
 static int which_attr(struct mtk_usb_boost *inst, struct device_attribute
@@ -334,7 +364,8 @@ static void test_loops(int id)
 	do_gettimeofday(&tv_after);
 	test_diff_sec = tv_after.tv_sec - tv_before.tv_sec;
 	test_diff_usec = tv_after.tv_usec - tv_before.tv_usec;
-	USB_BOOST_NOTICE("id<%d>, loops:%d, spent %d sec, %d usec\n", id, TEST_LOOP, test_diff_sec, test_diff_usec);
+	USB_BOOST_NOTICE("id<%d>, loops:%d, spent %d sec, %d usec\n",
+		id, TEST_LOOP, test_diff_sec, test_diff_usec);
 }
 
 static ssize_t attr_store(struct device *dev, struct device_attribute *attr,
@@ -353,7 +384,8 @@ static ssize_t attr_store(struct device *dev, struct device_attribute *attr,
 		return 0;
 
 	if (idx < 0) {
-		USB_BOOST_NOTICE("sorry, I cannot find rawbulk fn '%s'\n", attr->attr.name);
+		USB_BOOST_NOTICE("sorry, I cannot find rawbulk fn '%s'\n",
+			attr->attr.name);
 		goto exit;
 	}
 
@@ -366,7 +398,7 @@ static ssize_t attr_store(struct device *dev, struct device_attribute *attr,
 		if (tmp)
 			__the_boost_ops.boost_by_id[i] = __usb_boost_by_id;
 		else
-			__the_boost_ops.boost_by_id[i] = __usb_boost_by_id_empty;
+			__the_boost_ops.boost_by_id[i] = __usb_boost_id_empty;
 		boost_inst[i].para[idx] = (int)tmp;
 		break;
 	case ATTR_TIMEOUT:
@@ -427,7 +459,8 @@ exit:
 	return count;
 }
 
-static ssize_t attr_show(struct device *dev, struct device_attribute *attr, char *buf)
+static ssize_t attr_show(struct device *dev,
+	struct device_attribute *attr, char *buf)
 {
 	int i;
 	int idx;
@@ -465,7 +498,9 @@ static ssize_t attr_show(struct device *dev, struct device_attribute *attr, char
 		case CMD_HOOK_NORMAL:
 		case CMD_HOOK_EMPTY:
 		case CMD_HOOK_CNT:
-			count = sprintf(buf, "cmd<%d>, <%d, %d>\n", boost_inst[i].cmd, test_diff_sec, test_diff_usec);
+			count = sprintf(buf, "cmd<%d>, <%d, %d>\n",
+				boost_inst[i].cmd, test_diff_sec,
+				test_diff_usec);
 			break;
 		default:
 			break;
@@ -474,10 +509,12 @@ static ssize_t attr_show(struct device *dev, struct device_attribute *attr, char
 	/* RO usage */
 	case ATTR_RO_REF_TIME:
 		count = sprintf(buf, "<%d,%d>\n",
-				(int)boost_inst[i].tv_ref_time.tv_sec, (int)boost_inst[i].tv_ref_time.tv_usec);
+			(int)boost_inst[i].tv_ref_time.tv_sec,
+			(int)boost_inst[i].tv_ref_time.tv_usec);
 		break;
 	case ATTR_RO_IS_RUNNING:
-		count = sprintf(buf, "%s\n", boost_inst[i].is_running ? "true" : "false");
+		count = sprintf(buf, "%s\n",
+			boost_inst[i].is_running ? "true" : "false");
 		break;
 	case ATTR_RO_WORK_CNT:
 		count = sprintf(buf, "%d\n", boost_inst[i].work_cnt);
@@ -501,6 +538,7 @@ static ssize_t attr_show(struct device *dev, struct device_attribute *attr, char
 static int create_sys_fs(void)
 {
 	int i;
+	int n, ret;
 
 	USB_BOOST_NOTICE("\n");
 	usb_boost_class = class_create(THIS_MODULE, USB_BOOST_CLASS_NAME);
@@ -508,26 +546,26 @@ static int create_sys_fs(void)
 		return PTR_ERR(usb_boost_class);
 
 	for (i = 0 ; i < _TYPE_MAXID ; i++) {
+		boost_inst[i].dev = device_create(usb_boost_class,
+			NULL, MKDEV(0, i), NULL, type_name[i]);
 
-		boost_inst[i].dev = device_create(usb_boost_class, NULL, MKDEV(0,
-							  i), NULL, type_name[i]);
-		{
-			int n, ret;
+		for (n = 0; n < _ATTR_MAXID; n++) {
+			boost_inst[i].attr[n].attr.name = attr_name[n];
+				boost_inst[i].attr[n].attr.mode = 0400;
+			boost_inst[i].attr[n].show = attr_show;
+			boost_inst[i].attr[n].store = attr_store;
 
-			for (n = 0; n < _ATTR_MAXID; n++) {
-				boost_inst[i].attr[n].attr.name = attr_name[n];
-				boost_inst[i].attr[n].attr.mode = 0600;
-				boost_inst[i].attr[n].show = attr_show;
-				boost_inst[i].attr[n].store = attr_store;
-
-				ret = device_create_file(boost_inst[i].dev, &boost_inst[i].attr[n]);
-				if (ret < 0) {
-					while (--n >= 0)
-						device_remove_file(boost_inst[i].dev, &boost_inst[i].attr[n]);
-					return ret;
+			ret = device_create_file(boost_inst[i].dev,
+				&boost_inst[i].attr[n]);
+			if (ret < 0) {
+				while (--n >= 0) {
+					device_remove_file(boost_inst[i].dev,
+						&boost_inst[i].attr[n]);
 				}
+				return ret;
 			}
 		}
+
 	}
 	return 0;
 
@@ -537,19 +575,18 @@ int usb_boost_init(void)
 {
 	int id;
 
-	test_loops(-1);
 	for (id = 0; id < _TYPE_MAXID; id++) {
 		int count;
 		char wq_name[MAX_LEN_WQ_NAME];
 
 		count = sprintf(wq_name, "%s_wq", type_name[id]);
 		wq_name[count] = '\0';
-		test_loops(id);
 		boost_inst[id].id  = id;
 		update_time(id);
 		boost_inst[id].wq  = create_singlethread_workqueue(wq_name);
 		INIT_WORK(&boost_inst[id].work, boost_work);
-		USB_BOOST_DBG("ID<%d>, WQ<%p>, WORK<%p>\n", id, boost_inst[id].wq, &(boost_inst[id].work));
+		USB_BOOST_DBG("ID<%d>, WQ<%p>, WORK<%p>\n",
+			id, boost_inst[id].wq, &(boost_inst[id].work));
 		boost_inst[id].request_func = __request_it;
 	}
 	/* hook workable interface */
@@ -562,6 +599,6 @@ int usb_boost_init(void)
 
 	return 0;
 }
-module_param(trigger_cnt_disabled, int, 0600);
-module_param(enabled, int, 0600);
-module_param(inited, int, 0600);
+module_param(trigger_cnt_disabled, int, 0400);
+module_param(enabled, int, 0400);
+module_param(inited, int, 0400);

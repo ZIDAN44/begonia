@@ -13,11 +13,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -37,7 +32,7 @@
 #include <linux/debugfs.h>
 #include <linux/seq_file.h>
 
-#include <asm/uaccess.h>
+#include <linux/uaccess.h>
 
 #include "musb_core.h"
 #include "musb_debug.h"
@@ -46,6 +41,9 @@
 #include "mu3d_hal_hw.h"
 #include "mu3d_hal_qmu_drv.h"
 
+#ifdef CONFIG_PROJECT_PHY
+#include "mtk-phy-asic.h"
+#endif
 
 struct musb_register_map {
 	char *name;
@@ -216,12 +214,18 @@ static ssize_t musb_test_mode_write(struct file *file,
 		musb_load_testpacket(musb);
 	}
 
-	if (!strncmp(buf, "test K", 6))
+	if (!strncmp(buf, "test K", 6)) {
 		test = TEST_K_MODE;
-
-	if (!strncmp(buf, "test J", 6))
+#ifdef CONFIG_PROJECT_PHY
+	usb20_rev6_setting(0, false);
+#endif
+	}
+	if (!strncmp(buf, "test J", 6)) {
 		test = TEST_J_MODE;
-
+#ifdef CONFIG_PROJECT_PHY
+	usb20_rev6_setting(0, false);
+#endif
+	}
 	if (!strncmp(buf, "test SE0 NAK", 12))
 		test = TEST_SE0_NAK_MODE;
 
@@ -264,10 +268,11 @@ static int musb_usb_reg_show(struct seq_file *s, void *unused)
 			addr = (unsigned int *)gpd_phys_to_virt((void *)tmp, USB_TX, i);
 
 			/*seq_printf(s, "GPD[%08x] %08x, %08x, %08x, %08x\n",
-			   addr, (*(unsigned int*)addr),
-			   (*(unsigned int*)(addr+1)),
-			   (*(unsigned int*)(addr+2)),
-			   (*(unsigned int*)(addr+3))); */
+			 *  addr, (*(unsigned int*)addr),
+			 *  (*(unsigned int*)(addr+1)),
+			 *  (*(unsigned int*)(addr+2)),
+			 *  (*(unsigned int*)(addr+3)));
+			 */
 
 			seq_printf(s, "GPD[%p] HWO=%d, BPD=%d, Next_GPD=%lx, DataBuffer=%lx, BufferLen=%d\n",
 				addr, (u32) TGPD_GET_FLAG(addr),
@@ -293,10 +298,11 @@ static int musb_usb_reg_show(struct seq_file *s, void *unused)
 			addr = (unsigned int *)gpd_phys_to_virt((void *)tmp, USB_RX, i);
 
 			/*seq_printf(s, "GPD[%08x] %08x, %08x, %08x, %08x\n",
-			   addr, (*(unsigned int*)addr),
-			   (*(unsigned int*)(addr+1)),
-			   (*(unsigned int*)(addr+2)),
-			   (*(unsigned int*)(addr+3))); */
+			 *  addr, (*(unsigned int*)addr),
+			 *  (*(unsigned int*)(addr+1)),
+			 *  (*(unsigned int*)(addr+2)),
+			 *  (*(unsigned int*)(addr+3)));
+			 */
 
 			seq_printf(s, "GPD[%p] HWO=%d, Next_GPD=%lx ,DataBufLen=%d, DataBuf=%lx, RecvLen=%d, Endpoint=%d\n",
 					 addr, (u32) TGPD_GET_FLAG(addr), (uintptr_t) TGPD_GET_NEXT(addr),
@@ -548,6 +554,7 @@ static ssize_t musb_phy_rege_write(struct file *file,
 
 	return count;
 }
+
 
 static const struct file_operations musb_phy_reg_fops = {
 	.open = musb_phy_reg_open,

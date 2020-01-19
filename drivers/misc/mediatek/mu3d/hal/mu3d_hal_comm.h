@@ -38,38 +38,19 @@ extern
 
 /* TYPES */
 
-typedef unsigned int DEV_UINT32;
-typedef int DEV_INT32;
-typedef unsigned short DEV_UINT16;
-typedef short DEV_INT16;
-typedef unsigned char DEV_UINT8;
-typedef char DEV_INT8;
+#define DEV_UINT32 unsigned int
+#define DEV_INT32 int
+#define DEV_UINT16 unsigned short
+#define DEV_INT16 short
+#define DEV_UINT8 unsigned char
+#define DEV_INT8 char
 
-typedef enum {
+enum USB_RESULT {
 	RET_SUCCESS = 0,
 	RET_FAIL,
-} USB_RESULT;
+};
 
 #ifdef NEVER
-#define os_writeb(addr, data) {\
-	(*((volatile DEV_UINT8*)(addr)) = (DEV_UINT8)data);\
-	if (0) \
-		pr_debug("****** os_writeb [0x%08x] = 0x%08x (%s#%d)\n", (unsigned int)addr, data, __func__, __LINE__);\
-	}
-
-#define os_writew(addr, data) {\
-	(*((volatile DEV_UINT16*)(addr)) = (DEV_UINT16)data);\
-	if (0) \
-		pr_debug("****** os_writew [0x%08x] = 0x%08x (%s#%d)\n", (unsigned int)addr, data, __func__, __LINE__);\
-	}
-
-#define os_writel(addr, data) {\
-	(*((volatile DEV_UINT32*)(addr)) = (DEV_UINT32)data);\
-	if (0) \
-		pr_debug("****** os_writel [0x%08x] = 0x%08x (%s#%d)\n", (unsigned int)addr, data, __func__, __LINE__);\
-	}
-
-#define os_readl(addr)  (*((volatile DEV_UINT32 *)(addr)))
 #define os_writelmsk(addr, data, msk) \
 	{ os_writel(addr, ((os_readl(addr) & ~(msk)) | ((data) & (msk)))); \
 	}
@@ -116,7 +97,7 @@ static inline void os_writelmsk(void __iomem *addr, unsigned int data, unsigned 
 {
 	unsigned int tmp = readl((void __iomem *)addr);
 
-	mb();
+	mb();	/* avoid context switch */
 	writel(((tmp & ~(msk)) | ((data) & (msk))), (void __iomem *)addr);
 }
 
@@ -126,7 +107,7 @@ static inline void os_setmsk(void __iomem *addr, unsigned int msk)
 
 	if (0)
 		pr_debug("%s setmsk [%p] = 0x%08x\n", __func__, (void *)addr, tmp);
-	mb();
+	mb();	/* avoid context switch */
 	writel((tmp | msk), (void __iomem *)addr);
 	if (0)
 		pr_debug("%s setmsk [%p] = 0x%08x\n", __func__, (void *)addr,
@@ -139,7 +120,7 @@ static inline void os_clrmsk(void __iomem *addr, unsigned int msk)
 
 	if (0)
 		pr_debug("%s clrmsk [%p] = 0x%08x\n", __func__, (void *)addr, tmp);
-	mb();
+	mb();	/* avoid context switch */
 	writel((tmp & ~(msk)), (void __iomem *)addr);
 	if (0)
 		pr_debug("%s clrmsk [%p] = 0x%08x\n", __func__, (void *)addr,
@@ -152,7 +133,7 @@ static inline void os_writelmskumsk(void __iomem *addr, unsigned int data,
 {
 	unsigned int tmp = readl((void __iomem *)addr);
 
-	mb();
+	mb();	/* avoid context switch */
 	writel(((tmp & ~(msk)) | ((data) & (msk))) & (umsk), (void __iomem *)addr);
 }
 
@@ -164,7 +145,7 @@ static inline int wait_for_value(void __iomem *addr, unsigned int msk,
 	for (i = 0; i < count; i++) {
 		if ((os_readl(addr) & msk) == value)
 			return RET_SUCCESS;
-		mb();
+		mb();	/* avoid context switch */
 		mdelay(ms_intvl);
 	}
 	return RET_FAIL;
@@ -178,7 +159,7 @@ static inline int wait_for_value_us(void __iomem *addr, unsigned int msk,
 	for (i = 0; i < count; i++) {
 		if ((os_readl(addr) & msk) == value)
 			return RET_SUCCESS;
-		mb();
+		mb();	/* avoid context switch */
 		udelay(us_intvl);
 	}
 	return RET_FAIL;
@@ -192,7 +173,7 @@ static inline int wait_for_value_us(void __iomem *addr, unsigned int msk,
 #define USB_WriteCsr32(_bOffset, _bEnd, _bData) \
 			do {\
 				writel(_bData, (void __iomem *)(uintptr_t)(USB_END_OFFSET(_bEnd, _bOffset)));\
-				mb();\
+				mb(); /* avoid context switch */ \
 			} while (0)
 
 #endif

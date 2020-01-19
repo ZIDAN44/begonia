@@ -12,7 +12,7 @@
  */
 
 #include <cmdq_core.h>
-/* #include <cmdq_reg.h> */
+#include <cmdq_reg.h>
 
 #if defined(CONFIG_MTK_LEGACY)
 #include <mach/mt_clkmgr.h>
@@ -48,12 +48,12 @@ int32_t cmdqJpegDumpInfo(uint64_t engineFlag, int level)
 int32_t cmdqJpegResetEng(uint64_t engineFlag)
 {
 	if (engineFlag & (1 << CMDQ_ENG_JPEG_DEC)) {
-		IMG_REG_WRITE(0x0000FFFF, REG_ADDR_JPGDEC_INTERRUPT_STATUS);	/* ack decoder */
-		IMG_REG_WRITE(0x00, REG_ADDR_JPGDEC_RESET);	/* REG_JPGDEC_RESET = 0x00; */
-		IMG_REG_WRITE(0x01, REG_ADDR_JPGDEC_RESET);	/* REG_JPGDEC_RESET = 0x01; */
+		IMG_REG_WRITE(0x0000FFFF, REG_ADDR_JPGDEC_INTERRUPT_STATUS);
+		IMG_REG_WRITE(0x00, REG_ADDR_JPGDEC_RESET);
+		IMG_REG_WRITE(0x01, REG_ADDR_JPGDEC_RESET);
 
-		IMG_REG_WRITE(0x00, REG_ADDR_JPGDEC_RESET);	/* REG_JPGDEC_RESET = 0x00; */
-		IMG_REG_WRITE(0x10, REG_ADDR_JPGDEC_RESET);	/* REG_JPGDEC_RESET = 0x10; */
+		IMG_REG_WRITE(0x00, REG_ADDR_JPGDEC_RESET);
+		IMG_REG_WRITE(0x10, REG_ADDR_JPGDEC_RESET);
 	}
 
 	if (engineFlag & (1 << CMDQ_ENG_JPEG_ENC)) {

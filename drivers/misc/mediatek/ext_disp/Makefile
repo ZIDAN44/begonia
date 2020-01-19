@@ -12,14 +12,13 @@
 #
 
 PLATFORM := $(subst ",,$(CONFIG_MTK_PLATFORM))
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6580) $(CONFIG_ARCH_MT6755) $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753)))
-subdir-ccflags-y += -DCOMMON_DISP_LOG
+
+# mt6761 and mt6765 co-folder
+ifeq ($(PLATFORM),mt6761)
+PLATFORM := mt6765
 endif
+
 ifeq ($(CONFIG_SINGLE_PANEL_OUTPUT),y)
-    ifeq ($(CONFIG_ARCH_MT6735M), y)
-    obj-y += common/
-    obj-y += mt6735m/
-    endif
 else ifneq ($(wildcard $(srctree)/drivers/misc/mediatek/ext_disp/$(PLATFORM)/),)
 obj-y += $(PLATFORM)/
 obj-y += common/

@@ -10,57 +10,52 @@
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
 # GNU General Public License for more details.
 #
-subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat
-subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/include/mt-plat/$(MTK_PLATFORM)/include
-
-obj-$(CONFIG_ARCH_MT6755) += ppm_v1/
-obj-$(CONFIG_ARCH_MT6797) += ppm_v1/
-obj-$(CONFIG_ARCH_MT6757) += ppm_v2/
-ifeq ($(CONFIG_MTK_PLATFORM),"elbrus")
-obj-y += ppm_v2/
+obj-$(CONFIG_MACH_MT6768) += drcc_v1/
+obj-$(CONFIG_MACH_MT6785) += drcc_v1/
+obj-$(CONFIG_MACH_MT6768) += spm/
+obj-$(CONFIG_MACH_MT6785) += spm/
+obj-$(CONFIG_MACH_MT6785) += power_gs_v1/
+obj-$(CONFIG_MTK_STATIC_POWER) += leakage_table_v2/
+obj-$(CONFIG_MTK_CPU_FREQ) += cpufreq_v1/
+obj-$(CONFIG_MACH_MT6768) += dcm_v1/
+obj-$(CONFIG_MACH_MT6785) += dcm_v1/
+ifneq ($(CONFIG_FPGA_EARLY_PORTING), y)
+obj-$(CONFIG_MACH_MT6771) += cpuidle_v3/
+obj-$(CONFIG_MACH_MT6771) += pbm_v3/
+obj-$(CONFIG_MACH_MT6785) += pbm_v4/
+obj-$(CONFIG_MACH_MT6768) += pbm_v4/
+obj-$(CONFIG_MACH_MT6768) += mdpm_v1/
+obj-$(CONFIG_MACH_MT6785) += mdpm_v2/
+obj-$(CONFIG_MACH_MT6771) += spm_v4/
+obj-$(CONFIG_MACH_MT6771) += vcorefs_v3/
+obj-$(CONFIG_MACH_MT6771) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+obj-$(CONFIG_MACH_MT6768) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+obj-$(CONFIG_MACH_MT6785) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
+obj-$(CONFIG_MACH_MT6768) += clkbuf_v1/
+obj-$(CONFIG_MACH_MT6771) += clkbuf_v1/
+obj-$(CONFIG_MACH_MT6785) += clkbuf_v1/
 endif
-obj-$(CONFIG_ARCH_MT6735) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6735M) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6570) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6580) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6570) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6753) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6755) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6757) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT6797) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-#obj-$(CONFIG_ARCH_ELBRUS) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT8127) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT8163) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT8167) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT8173) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT8127) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_MACH_MT2701) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_ARCH_MT7623) += $(subst ",,$(CONFIG_MTK_PLATFORM))/
-obj-$(CONFIG_MT2701_DCM)  += mt2701_dcm/
-obj-$(CONFIG_MACH_MT2701) += hps/v1/
-obj-$(CONFIG_ARCH_MT7623) += hps/v1/
-obj-$(CONFIG_ARCH_MT8127) += hps/v1/
-obj-$(CONFIG_ARCH_MT8163) += hps/v1/
-obj-$(CONFIG_ARCH_MT8167) += hps/v1/
-obj-$(CONFIG_ARCH_MT8173) += hps/v1/
-obj-$(CONFIG_ARCH_MT6757) += hps/v2/
-obj-$(CONFIG_ARCH_MT6735) += spm_v1/
-obj-$(CONFIG_ARCH_MT6735M) += spm_v1/
-obj-$(CONFIG_ARCH_MT6753) += spm_v1/
-obj-$(CONFIG_ARCH_MT6570) += spm_v1/
-obj-$(CONFIG_ARCH_MT6580) += spm_v1/
-obj-$(CONFIG_ARCH_MT6755) += spm_v2/
-obj-$(CONFIG_ARCH_MT6757) += spm_v2/
-obj-$(CONFIG_ARCH_MT6797) += spm_v2/
-#obj-$(CONFIG_ARCH_ELBRUS) += spm_v3/
-obj-$(CONFIG_ARCH_ELBRUS) += clkbuf_v1/
-obj-$(CONFIG_ARCH_MT6755) += pbm_v1/
-obj-$(CONFIG_ARCH_MT6797) += pbm_v1/
-obj-$(CONFIG_ARCH_MT6757) += pbm_v1/
-obj-$(CONFIG_ARCH_MT6735) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6735M) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6753) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6580) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6570) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6755) += cpuidle_v1/
-obj-$(CONFIG_ARCH_MT6797) += cpuidle_v1/
+ifeq ($(CONFIG_MTK_CM_MGR), y)
+obj-$(CONFIG_MTK_CM_MGR) += cm_mgr_v1/
+endif
+obj-$(CONFIG_MTK_SWPM) += swpm_v1/
+
+obj-$(CONFIG_MACH_MT6771) += mcdi/
+obj-$(CONFIG_MACH_MT6768) += mcdi/
+obj-$(CONFIG_MACH_MT6785) += mcdi/
+obj-$(CONFIG_MACH_MT6771) += cpuhotplug/
+obj-$(CONFIG_MACH_MT6771) += ppm_v3/
+obj-$(CONFIG_MACH_MT6768) += ppm_v3/
+obj-$(CONFIG_MACH_MT6768) += cpuhotplug/
+obj-$(CONFIG_MACH_MT6768) += cpuidle_v3/
+obj-$(CONFIG_MACH_MT6768) += udi_v2/
+obj-$(CONFIG_MACH_MT6785) += udi_v2/
+obj-$(CONFIG_MACH_MT6785) += cpuhotplug/
+obj-$(CONFIG_MTK_PTPOD) += eem_v2/
+ifeq ($(CONFIG_MTK_UNIFY_POWER), y)
+obj-$(CONFIG_MTK_UNIFY_POWER) += upower_v2/
+obj-$(CONFIG_MACH_MT6771) += upower_v2/
+endif
+obj-$(CONFIG_MACH_MT6785) += cpuidle_v3/
+obj-$(CONFIG_MACH_MT6785) += ppm_v3/
+obj-$(CONFIG_MTK_QOS_V2) += qos/

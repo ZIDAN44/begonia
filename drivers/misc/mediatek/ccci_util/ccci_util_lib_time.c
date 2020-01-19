@@ -14,13 +14,13 @@
 #include <linux/module.h>
 #include <linux/device.h>
 #include <linux/spinlock.h>
-#include <mt-plat/mt_ccci_common.h>
+#include <mt-plat/mtk_ccci_common.h>
 #include <linux/wait.h>
 static wait_queue_head_t time_update_notify_queue_head;
 static spinlock_t wait_count_lock;
-static volatile unsigned int wait_count;
-static volatile unsigned int get_update;
-static volatile unsigned int api_ready;
+static unsigned int wait_count;
+static unsigned int get_update;
+static unsigned int api_ready;
 
 void ccci_timer_for_md_init(void)
 {
@@ -28,12 +28,13 @@ void ccci_timer_for_md_init(void)
 	spin_lock_init(&wait_count_lock);
 	wait_count = 0;
 	get_update = 0;
+	/* update in order */
 	mb();
 	api_ready = 1;
 }
 
 int wait_time_update_notify(void)
-{				/* Only support one wait currently */
+{	/* Only support one wait currently */
 	int ret = -1;
 	unsigned long flags;
 
@@ -43,7 +44,9 @@ int wait_time_update_notify(void)
 		wait_count++;
 		spin_unlock_irqrestore(&wait_count_lock, flags);
 
-		ret = wait_event_interruptible(time_update_notify_queue_head, get_update);
+		ret = wait_event_interruptible(
+				time_update_notify_queue_head,
+				get_update);
 		if (ret != -ERESTARTSYS)
 			get_update = 0;
 

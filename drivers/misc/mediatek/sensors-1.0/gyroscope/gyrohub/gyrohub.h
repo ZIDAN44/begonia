@@ -1,15 +1,15 @@
 /*
-* Copyright (C) 2016 MediaTek Inc.
-*
-* This program is free software; you can redistribute it and/or modify
-* it under the terms of the GNU General Public License version 2 as
-* published by the Free Software Foundation.
-*
-* This program is distributed in the hope that it will be useful,
-* but WITHOUT ANY WARRANTY; without even the implied warranty of
-* MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-* See http://www.gnu.org/licenses/gpl-2.0.html for more details.
-*/
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ */
 
 #ifndef GYROHUB_H
 #define GYROHUB_H
@@ -25,9 +25,9 @@
 
 #define GYROHUB_BUFSIZE 60
 
-/* 1 rad = 180/PI degree, MAX_LSB = 131, */
-/* 180*131/PI = 7506 */
-#define DEGREE_TO_RAD	7506
+/* 1 rad = 180/PI degree, MAX_LSB = 131000, */
+/* 180*131000/PI = 7505747 */
+#define DEGREE_TO_RAD	7505747
 
 #endif
 

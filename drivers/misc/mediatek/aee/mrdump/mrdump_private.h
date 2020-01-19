@@ -14,24 +14,50 @@
 #if !defined(__MRDUMP_PRIVATE_H__)
 #define __MRDUMP_PRIVATE_H__
 
-struct mrdump_platform {
-	void (*hw_enable)(bool enabled);
-	void (*reboot)(void);
-};
+#include <asm/cputype.h>
+#include <asm/memory.h>
+#include <asm/smp_plat.h>
+#include <asm/cputype.h>
+#include <asm-generic/sections.h>
+#include <linux/smp.h>
+
+extern int kernel_addr_valid(unsigned long addr);
+#define mrdump_virt_addr_valid(kaddr) \
+	kernel_addr_valid((unsigned long)kaddr)
+
+static inline int get_HW_cpuid(void)
+{
+	return smp_processor_id();
+}
 
 struct pt_regs;
 
-extern struct mrdump_control_block mrdump_cblock;
+extern struct mrdump_rsvmem_block mrdump_sram_cb;
+extern struct mrdump_control_block *mrdump_cblock;
+extern const unsigned long kallsyms_addresses[] __weak;
+extern const u8 kallsyms_names[] __weak;
+extern const u8 kallsyms_token_table[] __weak;
+extern const u16 kallsyms_token_index[] __weak;
+extern const unsigned long kallsyms_markers[] __weak;
+extern const unsigned long kallsyms_num_syms
+__attribute__((weak, section(".rodata")));
 
+
+int mrdump_hw_init(void);
 void mrdump_cblock_init(void);
-
-int mrdump_platform_init(const struct mrdump_platform *plat);
+int mrdump_full_init(void);
+int mrdump_wdt_init(void);
 
 void mrdump_save_current_backtrace(struct pt_regs *regs);
+void mrdump_save_control_register(void *creg);
 
-extern void __disable_dcache__inner_flush_dcache_L1__inner_flush_dcache_L2(void);
+extern int mrdump_rsv_conflict;
+extern void dis_D_inner_flush_all(void);
 extern void __inner_flush_dcache_all(void);
-extern void __disable_dcache(void);
+extern void mrdump_mini_add_entry(unsigned long addr, unsigned long size);
+
+int aee_dump_stack_top_binary(char *buf, int buf_len, unsigned long bottom,
+				unsigned long top);
 
 static inline void mrdump_mini_save_regs(struct pt_regs *regs)
 {
@@ -56,16 +82,51 @@ static inline void mrdump_mini_save_regs(struct pt_regs *regs)
 			  "stp	x28, x1, [x0],#16\n\t"
 			  "mov	x1, sp\n\t"
 			  "stp	x30, x1, [x0],#16\n\t"
-			  "mrs	x1, daif\n\t"
+			  "mrs	x1, currentel\n\t"
+			  "mrs	x30, daif\n\t"
+			  "orr	x1, x1, x30\n\t"
+			  "mrs	x30, nzcv\n\t"
+			  "orr	x1, x1, x30\n\t"
+			  "mrs	x30, spsel\n\t"
+			  "orr	x1, x1, x30\n\t"
 			  "adr	x30, 1b\n\t"
 			  "stp	x30, x1, [x0],#16\n\t"
 			  "sub	x1, x0, #272\n\t"
 			  "ldr	x0, [sp]\n\t"
 			  "str	x0, [x1]\n\t"
 			  "ldr	x0, [sp, #8]\n\t"
-			  "str	x0, [x1, #8]\n\t" "ldp	x0, x1, [sp],#16\n\t" :  : "r" (regs) : "cc");
+			  "str	x0, [x1, #8]\n\t"
+			  "ldp	x0, x1, [sp],#16\n\t" :  : "r" (regs) : "cc");
 #else
-	asm volatile ("stmia %1, {r0 - r15}\n\t" "mrs %0, cpsr\n":"=r" (regs->uregs[16]) : "r"(regs) : "memory");
+	asm volatile ("stmia %1, {r0 - r15}\n\t"
+		      "mrs %0, cpsr\n":"=r"
+		      (regs->uregs[16]) : "r"(regs) : "memory");
 #endif
 }
+
+extern void aee_rr_rec_kaslr_offset(uint64_t offset);
+#if defined(CONFIG_RANDOMIZE_BASE) && defined(CONFIG_ARM64)
+static inline void show_kaslr(void)
+{
+	u64 const kaslr_offset = kimage_vaddr - KIMAGE_VADDR;
+
+	pr_notice("Kernel Offset: 0x%llx from 0x%lx\n",
+			kaslr_offset, KIMAGE_VADDR);
+	pr_notice("PHYS_OFFSET: 0x%llx\n", PHYS_OFFSET);
+#ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_kaslr_offset(kaslr_offset);
+#endif
+}
+#else
+static inline void show_kaslr(void)
+{
+	pr_notice("Kernel Offset: disabled\n");
+#ifdef CONFIG_MTK_RAM_CONSOLE
+	aee_rr_rec_kaslr_offset(0);
+#endif
+}
+#endif
+
+int in_fiq_handler(void);
+
 #endif /* __MRDUMP_PRIVATE_H__ */

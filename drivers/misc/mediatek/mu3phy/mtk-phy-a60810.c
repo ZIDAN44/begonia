@@ -205,7 +205,8 @@ static void EyeScanHelper_RunTest(struct u3phy_info *info)
 	/* Wait til it's done */
 	/* RGS_SSUSB_RX_EYE_CNT_RDY */
 	while (!U3PhyReadField32(((phys_addr_t)(uintptr_t) &info->u3phyd_regs_a->phya_rx_mon5)
-	    , A60810_RGS_SSUSB_EQ_EYE_CNT_RDY_OFST, A60810_RGS_SSUSB_EQ_EYE_CNT_RDY));
+	    , A60810_RGS_SSUSB_EQ_EYE_CNT_RDY_OFST, A60810_RGS_SSUSB_EQ_EYE_CNT_RDY))
+		;
 }
 
 /* -------------------------------------------------------- */
@@ -442,13 +443,15 @@ PHY_INT32 phy_eyescan_a60810(struct u3phy_info *info, PHY_INT32 x_t1, PHY_INT32 
 
 				/* EyeScanHelper_GetResult(&_rRes.pwErrCnt0[bCnt], &_rRes.pwErrCnt1[bCnt]); */
 				/* pr_debug("cnt[%d] cur_x,y [0x%x][0x%x], cX,cY [0x%x][0x%x], ErrCnt[%d][%d]\n",
-				   bExtendCnt, _bXcurr, _bYcurr, cX, cY,
-				   pwErrCnt0[bExtendCnt][_bXcurr][_bYcurr],
-				   pwErrCnt1[bExtendCnt][_bXcurr][_bYcurr]); */
+				 *  bExtendCnt, _bXcurr, _bYcurr, cX, cY,
+				 *  pwErrCnt0[bExtendCnt][_bXcurr][_bYcurr],
+				 *  pwErrCnt1[bExtendCnt][_bXcurr][_bYcurr]);
+				 */
 			}
 			/* pr_debug("cur_x,y [0x%x][0x%x], cX,cY [0x%x][0x%x], ErrCnt[%d][%d]\n",
-			   _bXcurr, _bYcurr, cX, cY, pwErrCnt0[0][_bXcurr][_bYcurr],
-			   pwErrCnt1[0][_bXcurr][_bYcurr]); */
+			 *  _bXcurr, _bYcurr, cX, cY, pwErrCnt0[0][_bXcurr][_bYcurr],
+			 *  pwErrCnt1[0][_bXcurr][_bYcurr]);
+			 */
 		} else {
 
 		}

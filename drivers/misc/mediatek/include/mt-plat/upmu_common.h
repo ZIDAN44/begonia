@@ -33,7 +33,7 @@
 
 #define DBG_PMAPI_MASK (DBG_PMAPI_ALL)
 
-typedef enum MT65XX_POWER_VOL_TAG {
+enum MT65XX_POWER_VOL_TAG {
 	VOL_DEFAULT,
 	VOL_0200 = 200,
 	VOL_0220 = 220,
@@ -125,18 +125,7 @@ typedef enum MT65XX_POWER_VOL_TAG {
 	VOL_3500 = 3500,
 	VOL_3550 = 3550,
 	VOL_3600 = 3600
-} MT65XX_POWER_VOLTAGE;
-
-typedef struct {
-	unsigned long dwPowerCount;
-	bool bDefault_on;
-	char name[MAX_MOD_NAME];
-	char mod_name[MAX_DEVICE][MAX_MOD_NAME];
-} DEVICE_POWER;
-
-typedef struct {
-	DEVICE_POWER Power[MT65XX_POWER_COUNT_END];
-} ROOTBUS_HW;
+};
 
 /*
  * PMIC Exported Function for power service
@@ -146,8 +135,14 @@ extern signed int g_I_SENSE_offset;
 /*
  * PMIC extern functions
  */
-extern unsigned int pmic_read_interface(unsigned int RegNum, unsigned int *val, unsigned int MASK, unsigned int SHIFT);
-extern unsigned int pmic_config_interface(unsigned int RegNum, unsigned int val, unsigned int MASK, unsigned int SHIFT);
+extern unsigned int pmic_read_interface(unsigned int RegNum,
+					unsigned int *val,
+					unsigned int MASK,
+					unsigned int SHIFT);
+extern unsigned int pmic_config_interface(unsigned int RegNum,
+					  unsigned int val,
+					  unsigned int MASK,
+					  unsigned int SHIFT);
 extern unsigned int pmic_read_interface_nolock(unsigned int RegNum,
 	unsigned int *val,
 	unsigned int MASK,
@@ -156,40 +151,48 @@ extern unsigned int pmic_config_interface_nolock(unsigned int RegNum,
 	unsigned int val,
 	unsigned int MASK,
 	unsigned int SHIFT);
-extern unsigned short pmic_set_register_value(PMU_FLAGS_LIST_ENUM flagname, unsigned int val);
+extern unsigned int pmic_config_interface_nospinlock(unsigned int RegNum,
+	unsigned int val,
+	unsigned int MASK,
+	unsigned int SHIFT);
+#ifdef CONFIG_MTK_PMIC_COMMON
+extern unsigned short pmic_set_register_value(PMU_FLAGS_LIST_ENUM flagname,
+					      unsigned int val);
 extern unsigned short pmic_get_register_value(PMU_FLAGS_LIST_ENUM flagname);
-extern unsigned short pmic_set_register_value_nolock(PMU_FLAGS_LIST_ENUM flagname, unsigned int val);
-extern unsigned short pmic_get_register_value_nolock(PMU_FLAGS_LIST_ENUM flagname);
-extern unsigned short bc11_set_register_value(PMU_FLAGS_LIST_ENUM flagname, unsigned int val);
+extern unsigned short pmic_set_register_value_nolock(
+						PMU_FLAGS_LIST_ENUM flagname,
+						unsigned int val);
+extern unsigned short pmic_get_register_value_nolock(
+						PMU_FLAGS_LIST_ENUM flagname);
+extern unsigned short pmic_set_register_value_nospinlock(
+						PMU_FLAGS_LIST_ENUM flagname,
+						unsigned int val);
+extern unsigned short bc11_set_register_value(PMU_FLAGS_LIST_ENUM flagname,
+					      unsigned int val);
 extern unsigned short bc11_get_register_value(PMU_FLAGS_LIST_ENUM flagname);
+#endif
 extern void upmu_set_reg_value(unsigned int reg, unsigned int reg_val);
 extern unsigned int upmu_get_reg_value(unsigned int reg);
 extern void pmic_lock(void);
 extern void pmic_unlock(void);
 
-#ifdef CONFIG_MTK_PMIC_CHIP_MT6335
-extern void pmic_enable_interrupt(PMIC_IRQ_ENUM intNo, unsigned int en, char *str);
-extern void pmic_mask_interrupt(PMIC_IRQ_ENUM intNo, char *str);
-extern void pmic_unmask_interrupt(PMIC_IRQ_ENUM intNo, char *str);
-extern void pmic_register_interrupt_callback(PMIC_IRQ_ENUM intNo, void (EINT_FUNC_PTR) (void));
-#else
-extern void pmic_enable_interrupt(unsigned int intNo, unsigned int en, char *str);
+extern void pmic_enable_interrupt(unsigned int intNo,
+				  unsigned int en,
+				  char *str);
 extern void pmic_mask_interrupt(unsigned int intNo, char *str);
 extern void pmic_unmask_interrupt(unsigned int intNo, char *str);
-extern void pmic_register_interrupt_callback(unsigned int intNo, void (EINT_FUNC_PTR) (void));
-#endif
+extern void pmic_register_interrupt_callback(unsigned int intNo
+				, void(EINT_FUNC_PTR)(void));
+
 extern unsigned short is_battery_remove_pmic(void);
 
-extern signed int PMIC_IMM_GetCurrent(void);
-extern unsigned int PMIC_IMM_GetOneChannelValue(pmic_adc_ch_list_enum dwChannel, int deCount,
-		int trimd);
-extern void pmic_auxadc_init(void);
 extern void lockadcch3(void);
 extern void unlockadcch3(void);
 
 extern unsigned int pmic_Read_Efuse_HPOffset(int i);
 extern void Charger_Detect_Init(void);
 extern void Charger_Detect_Release(void);
+extern void usb_dpdm_pulldown(bool enable);
 
 extern int get_dlpt_imix_spm(void);
 extern int get_dlpt_imix(void);
@@ -197,14 +200,16 @@ extern int dlpt_check_power_off(void);
 extern unsigned int pmic_read_vbif28_volt(unsigned int *val);
 extern unsigned int pmic_get_vbif28_volt(void);
 extern void pmic_auxadc_debug(int index);
-extern bool hwPowerOn(MT65XX_POWER powerId, int voltage_uv, char *mode_name);
-extern bool hwPowerDown(MT65XX_POWER powerId, char *mode_name);
+extern int PMIC_IMM_GetOneChannelValue(unsigned int dwChannel,
+				       int deCount,
+				       int trimd);
 
 extern int get_battery_plug_out_status(void);
 
 extern void pmic_turn_on_clock(unsigned int enable);
 extern int do_ptim_ex(bool isSuspend, unsigned int *bat, signed int *cur);
 extern void get_ptim_value(bool isSuspend, unsigned int *bat, signed int *cur);
+
 extern int pmic_pre_wdt_reset(void);
 extern int pmic_pre_condition1(void);
 extern int pmic_pre_condition2(void);
@@ -213,6 +218,20 @@ extern int pmic_post_condition1(void);
 extern int pmic_post_condition2(void);
 extern int pmic_post_condition3(void);
 extern int pmic_dump_all_reg(void);
+
 extern int pmic_force_vcore_pwm(bool enable);
+
+extern int is_ext_buck_gpio_exist(void);
+extern int is_ext_buck_exist(void);
+extern int is_ext_buck2_exist(void);
+extern int is_ext_buck_gpio_exist(void);
+extern int is_ext_vbat_boost_exist(void);
+extern int is_ext_swchr_exist(void);
+
+/*----- Smart Reset -----*/
+extern void pmic_enable_smart_reset(unsigned char smart_en,
+				    unsigned char smart_sdn_en);
+/*----- BAT_TEMP detection -----*/
+extern void enable_bat_temp_det(bool en);
 
 #endif				/* _MT_PMIC_COMMON_H_ */

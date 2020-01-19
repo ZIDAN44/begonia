@@ -15,6 +15,7 @@
 #include <asm/stacktrace.h>
 #include <asm/system_misc.h>
 #include <asm/traps.h>
+#include <mt-plat/mrdump.h>
 #include "mrdump_private.h"
 
 void mrdump_save_current_backtrace(struct pt_regs *regs)
@@ -34,7 +35,8 @@ void mrdump_save_current_backtrace(struct pt_regs *regs)
 		      "stp x24, x25, [%0, #192]\n\t"
 		      "stp x26, x27, [%0, #208]\n\t"
 		      "stp x28, x29, [%0, #224]\n\t"
-		      "str x30, [%0, #240]\n\t" : : "r" (&regs->user_regs) : "memory");
+		      "str x30, [%0, #240]\n\t" : :
+		      "r" (&regs->user_regs) : "memory");
 	asm volatile ("mrs x8, currentel\n\t"
 		      "mrs x9, daif\n\t"
 		      "orr x8, x8, x9\n\t"
@@ -50,4 +52,20 @@ void mrdump_save_current_backtrace(struct pt_regs *regs)
 		      "str x8, [%1]\n\t"
 		      : : "r" (&regs->user_regs.sp), "r"(&regs->user_regs.pc),
 		      "r"(&regs->user_regs.pstate)  : "x8", "x9", "memory");
+}
+
+void mrdump_save_control_register(void *creg)
+{
+	struct aarch64_ctrl_regs *cregs = (struct aarch64_ctrl_regs *)creg;
+
+	asm volatile ("mrs %0, sctlr_el1\n\t"
+		      "mrs %1, tcr_el1\n\t"
+		      "mrs %2, ttbr0_el1\n\t"
+		      "mrs %3, ttbr1_el1\n\t"
+		      "mrs %4, sp_el0\n\t"
+		      "mov %5, sp\n\t"
+		      : "=r"(cregs->sctlr_el1), "=r"(cregs->tcr_el1),
+		      "=r"(cregs->ttbr0_el1), "=r"(cregs->ttbr1_el1),
+		      "=r"(cregs->sp_el[0]), "=r"(cregs->sp_el[1])
+		      : : "memory");
 }

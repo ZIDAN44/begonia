@@ -12,9 +12,9 @@
  */
 
 /*
-  boot logger: drivers/misc/mtprof/bootprof
-  interface: /proc/bootprof
-*/
+ *  boot logger: drivers/misc/mtprof/bootprof
+ * interface: /proc/bootprof
+ */
 #ifndef _BOOTPROF_H_
 #define _BOOTPROF_H_
 #ifdef CONFIG_SCHEDSTATS
@@ -23,7 +23,10 @@ extern void log_boot(char *str);
 #define log_boot(str)
 #endif
 
-#include <linux/sched.h>
+//#include <linux/sched.h>
+//#include <linux/sched_clock.h>
+#include <linux/sched/clock.h>
+
 #ifndef TIME_LOG_START
 #define TIME_LOG_START() \
 	({ts = sched_clock(); })

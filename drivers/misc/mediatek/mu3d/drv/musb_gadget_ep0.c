@@ -15,11 +15,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -45,6 +40,14 @@
 #include "mu3d_hal_osal.h"
 #include "mu3d_hal_usb_drv.h"
 #include "mu3d_hal_hw.h"
+#ifdef CONFIG_PROJECT_PHY
+#include "mtk-phy-asic.h"
+#endif
+
+#ifdef CONFIG_PHY_MTK_SSUSB
+#include "mtk-ssusb-hal.h"
+#endif
+
 
 /* ep0 is always musb->endpoints[0].ep_in */
 #define	next_ep0_request(musb)	next_in_request(&(musb)->endpoints[0])
@@ -92,11 +95,13 @@ __releases(musb->lock) __acquires(musb->lock)
 	int retval;
 
 	os_printk(K_DEBUG, "%s\n", __func__);
-	if (!musb->gadget_driver)
+	if (!musb->gadget_driver || !musb->softconnect) {
+		os_printk(K_NOTICE, "%s, driver<%p>, softconn<%d>\n",
+				__func__, musb->gadget_driver, musb->softconnect);
 		return -EOPNOTSUPP;
+	}
 	spin_unlock(&musb->lock);
 	retval = musb->gadget_driver->setup(&musb->g, ctrlrequest);
-	os_printk(K_DEBUG, "%s retval=%d\n", __func__, retval);
 
 	if (ctrlrequest->bRequest == USB_REQ_SET_CONFIGURATION) {
 		if (ctrlrequest->wValue & 0xff)
@@ -421,7 +426,8 @@ __releases(musb->lock) __acquires(musb->lock)
 						os_printk(K_DEBUG, "RST TX%d\n", epnum);
 
 						/* We cannot flush QMU now, because the MSC gadget
-						 * will not re-submit the CBW request after clear halt. */
+						 * will not re-submit the CBW request after clear halt.
+						*/
 
 						/* _ex_mu3d_hal_flush_qmu(epnum, USB_TX); */
 						/* mu3d_hal_restart_qmu(epnum, USB_TX); */
@@ -442,7 +448,8 @@ __releases(musb->lock) __acquires(musb->lock)
 						os_writel(U3D_EP_RST, os_readl(U3D_EP_RST) & (~(1 << epnum)));
 						os_printk(K_DEBUG, "RST RX%d\n", epnum);
 						/* We cannot flush QMU now, because the MSC gadget will not
-						 * re-submit the CBW request after clear halt. */
+						 * re-submit the CBW request after clear halt.
+						 */
 
 						/* _ex_mu3d_hal_flush_qmu(epnum, USB_RX); */
 						/* mu3d_hal_restart_qmu(epnum, USB_RX); */
@@ -485,11 +492,17 @@ __releases(musb->lock) __acquires(musb->lock)
 						pr_debug("TEST_J\n");
 						/* TEST_J */
 						musb->test_mode_nr = TEST_J_MODE;
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
+						usb20_rev6_setting(0, false);
+#endif
 						break;
 					case 2:
 						/* TEST_K */
 						pr_debug("TEST_K\n");
 						musb->test_mode_nr = TEST_K_MODE;
+#if defined(CONFIG_PROJECT_PHY) || defined(CONFIG_PHY_MTK_SSUSB)
+						usb20_rev6_setting(0, false);
+#endif
 						break;
 					case 3:
 						/* TEST_SE0_NAK */
@@ -623,16 +636,16 @@ stall:
 
 					if (!(csr & TX_FIFOEMPTY)) {
 						/*
-						 csr &= TX_W1C_BITS; //don't clear W1C bits
-						 csr |= USB_TXCSR_FLUSHFIFO;
-						 //os_printk(K_DEBUG, "EP%d USB_TXCSR_FLUSHFIFO\n", epnum);
-						 //flush fifo before sendstall.
-						 SSUSB_WriteCsr16(U3D_TX1CSR0, epnum, csr );
-						 Follow ssusb programming guide.
-						 while(USB_ReadCsr16(U3D_TX1CSR0, epnum) & USB_TXCSR_FLUSHFIFO)
-						 {
-						 cpu_relax();
-						 }
+						 * csr &= TX_W1C_BITS; //don't clear W1C bits
+						 *csr |= USB_TXCSR_FLUSHFIFO;
+						 *os_printk(K_DEBUG, "EP%d USB_TXCSR_FLUSHFIFO\n", epnum);
+						 *flush fifo before sendstall.
+						 *SSUSB_WriteCsr16(U3D_TX1CSR0, epnum, csr );
+						 *Follow ssusb programming guide.
+						 *while(USB_ReadCsr16(U3D_TX1CSR0, epnum) & USB_TXCSR_FLUSHFIFO)
+						 *{
+						 *cpu_relax();
+						 *}
 						 */
 						/* reset TX EP */
 						os_writel(U3D_EP_RST, os_readl(U3D_EP_RST) | (BIT16 << epnum));
@@ -722,11 +735,12 @@ static void ep0_rxstate(struct musb *musb)
 		req->actual += count;
 		csr |= EP0_RXPKTRDY;
 		/*REVISIT-J: 64 is usb20 ep0 maxp, but usb30 ep0 maxp is 512.
-		 *Do we need the modification? */
+		 *Do we need the modification?
+		 */
 		if (count < 64 || req->actual == req->length) {
 			/* musb->ep0_state = MUSB_EP0_STAGE_STATUSIN; */
 			/* in ssusb, there is no interrupt to transit to idle phase. */
-			musb->ep0_state = MUSB_EP0_IDLE;
+			musb->ep0_state = MUSB_EP0_STAGE_IDLE;
 			os_printk(K_DEBUG,
 				  "----- ep0 state: MUSB_EP0_STAGE_STATUSIN then MUSB_EP0_IDLE\n");
 
@@ -916,18 +930,19 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 	os_printk(K_DEBUG, "%s csr=0x%X\n", __func__, csr);
 
 	/* dev_dbg(musb->controller, "csr %04x, count %d, myaddr %d, ep0stage %s\n",
-	   csr, len,
-	   musb_readb(mbase, MUSB_FADDR),
-	   decode_ep0stage(musb->ep0_state));
+	 *  csr, len,
+	 *  musb_readb(mbase, MUSB_FADDR),
+	 *  decode_ep0stage(musb->ep0_state));
 	 */
 
-	/* if (csr & MUSB_CSR0_P_DATAEND) { */
-	/*
+	/* if (csr & MUSB_CSR0_P_DATAEND) {
+	 *
 	 * If DATAEND is set we should not call the callback,
 	 * hence the status stage is not complete.
+	 *
+	 *      return IRQ_HANDLED;
+	   }
 	 */
-	/*      return IRQ_HANDLED;
-	   } */
 
 	/* I sent a stall.. need to acknowledge it now.. */
 	if (csr & EP0_SENTSTALL) {
@@ -977,7 +992,7 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 			os_printk(K_DEBUG, "----- ep0 state: MUSB_EP0_STAGE_STATUSIN\n");
 			break;
 		default:
-			ERR("SetupEnd came in a wrong ep0stage %s\n",
+			dev_err(musb->controller, "SetupEnd came in a wrong ep0stage %s\n",
 			    decode_ep0stage(musb->ep0_state));
 		}
 		csr = os_readl(U3D_EP0CSR);
@@ -1012,33 +1027,8 @@ irqreturn_t musb_g_ep0_irq(struct musb *musb)
 
 	case MUSB_EP0_STAGE_STATUSIN:
 /* Because ssusb doesn't have interrupt	after In status, we actually don't have STATUSIN stage.
- * It has been moved to MUSB_EP0_STAGE_SETUP.		*/
-#if 0
-		/* end of sequence #2 (OUT/RX state) or #3 (no data) */
-
-		/* update address (if needed) only @ the end of the
-		 * status phase per usb spec, which also guarantees
-		 * we get 10 msec to receive this irq... until this
-		 * is done we won't see the next packet.
+ * It has been moved to MUSB_EP0_STAGE_SETUP.
 		 */
-		if (musb->set_address) {
-			musb->set_address = false;
-			os_writel(U3D_DEVICE_CONF,
-				  os_readl(U3D_DEVICE_CONF) | (musb->address << DEV_ADDR_OFST));
-		}
-
-		/* enter test mode if needed (exit by reset) */
-		else if (musb->test_mode) {
-			dev_dbg(musb->controller, "entering TESTMODE\n");
-
-			os_printk(K_DEBUG, "entering TESTMODE 1\n");
-
-			if (TEST_PACKET_MODE == musb->test_mode_nr)
-				musb_load_testpacket(musb);
-
-			os_writel(U3D_USB2_TEST_MODE, musb->test_mode_nr);
-		}
-#endif
 		/* FALLTHROUGH */
 
 	case MUSB_EP0_STAGE_STATUSOUT:
@@ -1091,7 +1081,7 @@ setup:
 			int handled = 0;
 
 			if (len != 8) {
-				ERR("SETUP packet len %d != 8 ?\n", len);
+				dev_err(musb->controller, "SETUP packet len %d != 8 ?\n", len);
 				break;
 			}
 			musb_read_setup(musb, &setup);
@@ -1101,15 +1091,15 @@ setup:
 			if (unlikely(musb->g.speed == USB_SPEED_UNKNOWN)) {
 				/*REVISIT-J: Shall we implement it? */
 /* mark temporarily for ssusb because PMU is not ready.
-				u8	power;
-
-				printk(KERN_NOTICE "%s: peripheral reset "
-						"irq lost!\n",
-						musb_driver_name);
-				power = musb_readb(mbase, MUSB_POWER);
-				musb->g.speed = (power & HS_MODE)
-					? USB_SPEED_HIGH : USB_SPEED_FULL;
-
+ *				u8	power;
+ *
+ *				printk(KERN_NOTICE "%s: peripheral reset "
+ *						"irq lost!\n",
+ *						musb_driver_name);
+ *				power = musb_readb(mbase, MUSB_POWER);
+ *				musb->g.speed = (power & HS_MODE)
+ *					? USB_SPEED_HIGH : USB_SPEED_FULL;
+ *
 */
 			}
 
@@ -1135,7 +1125,8 @@ setup:
 				/*if (1)*/ /*marked for DEEP_INDENTATION*/
 				{
 				/* Because status phase currently doesn't
-				 * have interrupt, we process here. */
+				 * have interrupt, we process here.
+				 */
 				/* Process here according to ssusb programming guide */
 				if (musb->set_address) {
 					musb->set_address = false;
@@ -1149,7 +1140,7 @@ setup:
 				} else if (musb->test_mode) {
 					os_printk(K_DEBUG, "entering TESTMODE 2\n");
 
-					if (TEST_PACKET_MODE == musb->test_mode_nr)
+					if (musb->test_mode_nr == TEST_PACKET_MODE)
 						musb_load_testpacket(musb);
 
 					/* musb_writeb(mbase, MUSB_TESTMODE, */
@@ -1185,7 +1176,8 @@ setup:
 						musb_g_ep0_giveback(musb, request);
 					} else {
 						/* os_printk(K_DEBUG,
-						"&&&&&&&&&&&&&&&&& next_ep0_request returns null\n"); */
+						 *"&&&&&&&&&&&&&&&&& next_ep0_request returns null\n");
+						 */
 					}
 				}
 				}
@@ -1196,7 +1188,8 @@ setup:
 				/* status stage might be immediate */
 				if (handled > 0) {
 					/* Change to idle because status in will be completed
-					 * immediately after dataend is set */
+					 * immediately after dataend is set
+					 */
 					musb->ep0_state = MUSB_EP0_STAGE_IDLE;
 					os_printk(K_DEBUG,
 						  "----- ep0 state: MUSB_EP0_STAGE_IDLE\n");
@@ -1235,8 +1228,9 @@ setup:
 				/*if (1) */ /*DEEP_INDENTATION*/
 				{
 				/* process MUSB_EP0_STAGE_STATUSOUT because currently
-				 * we don't have interrupt after status out phase. */
-				/* end of sequence #1: write to host (TX state) */
+				 * we don't have interrupt after status out phase.
+				 * end of sequence #1: write to host (TX state)
+				 */
 				{
 					struct usb_request *request;
 					struct musb_request *req;
@@ -1260,7 +1254,8 @@ setup:
 					  __func__, __LINE__);
 				}
 				/* process MUSB_EP0_STAGE_STATUSOUT because currently
-				 * we don't have interrupt after status out phase. */
+				 * we don't have interrupt after status out phase.
+				 */
 
 				break;
 
@@ -1424,6 +1419,7 @@ static int musb_g_ep0_queue(struct usb_ep *e, struct usb_request *r, gfp_t gfp_f
 		status = 0;
 		break;
 	default:
+		os_printk(K_DEBUG, "ep0 request queued in state %d\n", musb->ep0_state);
 		dev_dbg(musb->controller, "ep0 request queued in state %d\n", musb->ep0_state);
 		status = -EINVAL;
 		goto cleanup;

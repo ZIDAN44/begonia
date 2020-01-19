@@ -11,7 +11,8 @@
 # GNU General Public License for more details.
 #
 
+ccflags-y += -I$(srctree)/drivers/misc/mediatek/freqhopping/$(MTK_PLATFORM)/
 
-obj-y := mt_freqhopping_drv.o
+obj-y := mtk_freqhopping_drv.o
 obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 

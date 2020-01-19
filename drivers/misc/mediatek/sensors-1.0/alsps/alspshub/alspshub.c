@@ -1,29 +1,35 @@
 /*
- * Author: yucong xiong <yucong.xion@mediatek.com>
+ * Copyright (C) 2016 MediaTek Inc.
+ * Copyright (C) 2019 XiaoMi, Inc.
  *
- * This software is licensed under the terms of the GNU General Public
- * License version 2, as published by the Free Software Foundation, and
- * may be copied, distributed, and modified under those terms.
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
  *
  * This program is distributed in the hope that it will be useful,
  * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
  */
+
+
+#define pr_fmt(fmt) "[ALS/PS] " fmt
+
 #include "alspshub.h"
 #include <alsps.h>
 #include <hwmsensor.h>
 #include <SCP_sensorHub.h>
 #include "SCP_power_monitor.h"
+#include <linux/pm_wakeup.h>
 
+#define XIAOMI_FACTORY_CALIBRATION 1
+#define ALS_CALI_INFO_SET_SCALE 0
+#define AMBIENT_LCD_BACKLIGHT_HIGH 13
+#define AMBIENT_LCD_BACKLIGHT_LOW 14
+
+#define AMBIENT_LCD_BACKLIGHT_VALUE 100
 
 #define ALSPSHUB_DEV_NAME     "alsps_hub_pl"
-#define APS_TAG                  "[ALS/PS] "
-#define APS_FUN(f)               pr_err(APS_TAG"%s\n", __func__)
-#define APS_ERR(fmt, args...)    pr_err(APS_TAG"%s %d : "fmt, __func__, __LINE__, ##args)
-#define APS_LOG(fmt, args...)    pr_err(APS_TAG fmt, ##args)
-#define APS_DBG(fmt, args...)    pr_err(APS_TAG fmt, ##args)
 
 struct alspshub_ipi_data {
 	struct work_struct init_done_work;
@@ -35,24 +41,31 @@ struct alspshub_ipi_data {
 	atomic_t	scp_init_done;
 
 	/*data */
-	u16			als;
-	u8			ps;
-	int			ps_cali;
-	atomic_t	ps_thd_val_high;	/*the cmd value can't be read, stored in ram*/
-	atomic_t	ps_thd_val_low;		/*the cmd value can't be read, stored in ram*/
-	atomic_t	als_thd_val_high;	/*the cmd value can't be read, stored in ram*/
-	atomic_t	als_thd_val_low;	/*the cmd value can't be read, stored in ram*/
-	atomic_t	ps_thd_val;
-	ulong		enable;				/*enable mask */
-	ulong		pending_intr;		/*pending interrupt */
+	u16		als;
+	u8		ps;
+	int		ps_cali;
+	int32_t		ps_thd_cali[4];
+	atomic_t	als_cali;
+	int32_t		backlight_high;
+	int32_t		backlight_low;
+	int32_t		high_bias;
+	int32_t		low_bias;
+	atomic_t	ps_thd_val_high;
+	atomic_t	ps_thd_val_low;
+	ulong		enable;
+	ulong		pending_intr;
 	bool als_factory_enable;
 	bool ps_factory_enable;
 	bool als_android_enable;
 	bool ps_android_enable;
+	struct wakeup_source ps_wake_lock;
+	struct completion ps_calibration_done;
+
+	struct work_struct cabc_notify_work;
+	int16_t cabc_backlight_value;
 };
 
 static struct alspshub_ipi_data *obj_ipi_data;
-static int set_psensor_threshold(void);
 static int ps_get_data(int *value, int *status);
 
 static int alspshub_local_init(void);
@@ -66,6 +79,7 @@ static struct alsps_init_info alspshub_init_info = {
 };
 
 static DEFINE_MUTEX(alspshub_mutex);
+static DEFINE_SPINLOCK(calibration_lock);
 
 enum {
 	CMC_BIT_ALS = 1,
@@ -91,7 +105,8 @@ long alspshub_read_ps(u8 *ps)
 	res = sensor_get_data_from_hub(ID_PROXIMITY, &data_t);
 	if (res < 0) {
 		*ps = -1;
-		APS_ERR("sensor_get_data_from_hub fail, (ID: %d)\n", ID_PROXIMITY);
+		pr_err("sensor_get_data_from_hub fail, (ID: %d)\n",
+			ID_PROXIMITY);
 		return -1;
 	}
 	if (data_t.proximity_t.steps < obj->ps_cali)
@@ -104,61 +119,69 @@ long alspshub_read_ps(u8 *ps)
 long alspshub_read_als(u16 *als)
 {
 	long res = 0;
+	struct data_unit_t data_t;
 
-	res = sensor_set_cmd_to_hub(ID_LIGHT, CUST_ACTION_GET_RAW_DATA, als);
+	res = sensor_get_data_from_hub(ID_LIGHT, &data_t);
 	if (res < 0) {
 		*als = -1;
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_LIGHT, CUST_ACTION_GET_RAW_DATA);
+		pr_err_ratelimited("sensor_get_data_from_hub fail, (ID: %d)\n",
+			ID_LIGHT);
 		return -1;
 	}
+	*als = data_t.light;
+
 	return 0;
 }
 
-static ssize_t alspshub_show_trace(struct device_driver *ddri, char *buf)
+static ssize_t trace_show(struct device_driver *ddri, char *buf)
 {
 	ssize_t res = 0;
+	struct alspshub_ipi_data *obj = obj_ipi_data;
 
 	if (!obj_ipi_data) {
-		APS_ERR("obj_ipi_data is null!!\n");
+		pr_err("obj_ipi_data is null!!\n");
 		return 0;
 	}
 
-	res = snprintf(buf, PAGE_SIZE, "0x%04X\n", atomic_read(&obj_ipi_data->trace));
+	res = snprintf(buf, PAGE_SIZE, "0x%04X\n", atomic_read(&obj->trace));
 	return res;
 }
 
-static ssize_t alspshub_store_trace(struct device_driver *ddri, const char *buf, size_t count)
+static ssize_t trace_store(struct device_driver *ddri,
+				const char *buf, size_t count)
 {
 	int trace = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 	int res = 0;
+	int ret = 0;
 
 	if (!obj) {
-		APS_ERR("obj_ipi_data is null!!\n");
+		pr_err("obj_ipi_data is null!!\n");
 		return 0;
 	}
-
-	if (sscanf(buf, "0x%x", &trace) == 1) {
-		atomic_set(&obj->trace, trace);
-		res = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_SET_TRACE, &trace);
-		if (res < 0) {
-			APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
-				ID_PROXIMITY, CUST_ACTION_SET_TRACE);
-			return 0;
-		}
-	} else {
-		APS_ERR("invalid content: '%s', length = %zu\n", buf, count);
+	ret = sscanf(buf, "0x%x", &trace);
+	if (ret != 1) {
+		pr_err("invalid content: '%s', length = %zu\n", buf, count);
+		return count;
+	}
+	atomic_set(&obj->trace, trace);
+	res = sensor_set_cmd_to_hub(ID_PROXIMITY,
+		CUST_ACTION_SET_TRACE, &trace);
+	if (res < 0) {
+		pr_err("sensor_set_cmd_to_hub fail,(ID: %d),(action: %d)\n",
+			ID_PROXIMITY, CUST_ACTION_SET_TRACE);
+		return 0;
 	}
 	return count;
 }
 
-static ssize_t alspshub_show_als(struct device_driver *ddri, char *buf)
+static ssize_t als_show(struct device_driver *ddri, char *buf)
 {
 	int res = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
 	if (!obj) {
-		APS_ERR("obj_ipi_data is null!!\n");
+		pr_err("obj_ipi_data is null!!\n");
 		return 0;
 	}
 	res = alspshub_read_als(&obj->als);
@@ -168,13 +191,13 @@ static ssize_t alspshub_show_als(struct device_driver *ddri, char *buf)
 		return snprintf(buf, PAGE_SIZE, "0x%04X\n", obj->als);
 }
 
-static ssize_t alspshub_show_ps(struct device_driver *ddri, char *buf)
+static ssize_t ps_show(struct device_driver *ddri, char *buf)
 {
 	ssize_t res = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
 	if (!obj) {
-		APS_ERR("cm3623_obj is null!!\n");
+		pr_err("cm3623_obj is null!!\n");
 		return 0;
 	}
 	res = alspshub_read_ps(&obj->ps);
@@ -184,51 +207,54 @@ static ssize_t alspshub_show_ps(struct device_driver *ddri, char *buf)
 		return snprintf(buf, PAGE_SIZE, "0x%04X\n", obj->ps);
 }
 
-static ssize_t alspshub_show_reg(struct device_driver *ddri, char *buf)
+static ssize_t reg_show(struct device_driver *ddri, char *buf)
 {
 	int res = 0;
 
 	res = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_SHOW_REG, buf);
 	if (res < 0) {
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_PROXIMITY, CUST_ACTION_SHOW_REG);
+		pr_err("sensor_set_cmd_to_hub fail,(ID: %d),(action: %d)\n",
+			ID_PROXIMITY, CUST_ACTION_SHOW_REG);
 		return 0;
 	}
 
 	return res;
 }
 
-static ssize_t alspshub_show_alslv(struct device_driver *ddri, char *buf)
+static ssize_t alslv_show(struct device_driver *ddri, char *buf)
 {
 	int res = 0;
 
 	res = sensor_set_cmd_to_hub(ID_LIGHT, CUST_ACTION_SHOW_ALSLV, buf);
 	if (res < 0) {
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_LIGHT, CUST_ACTION_SHOW_ALSLV);
+		pr_err("sensor_set_cmd_to_hub fail,(ID: %d),(action: %d)\n",
+			ID_LIGHT, CUST_ACTION_SHOW_ALSLV);
 		return 0;
 	}
 
 	return res;
 }
 
-static ssize_t alspshub_show_alsval(struct device_driver *ddri, char *buf)
+static ssize_t alsval_show(struct device_driver *ddri, char *buf)
 {
 	int res = 0;
 
 	res = sensor_set_cmd_to_hub(ID_LIGHT, CUST_ACTION_SHOW_ALSVAL, buf);
 	if (res < 0) {
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n", ID_LIGHT, CUST_ACTION_SHOW_ALSVAL);
+		pr_err("sensor_set_cmd_to_hub fail,(ID: %d),(action: %d)\n",
+			ID_LIGHT, CUST_ACTION_SHOW_ALSVAL);
 		return 0;
 	}
 
 	return res;
 }
 
-static DRIVER_ATTR(als, S_IWUSR | S_IRUGO, alspshub_show_als, NULL);
-static DRIVER_ATTR(ps, S_IWUSR | S_IRUGO, alspshub_show_ps, NULL);
-static DRIVER_ATTR(alslv, S_IWUSR | S_IRUGO, alspshub_show_alslv, NULL);
-static DRIVER_ATTR(alsval, S_IWUSR | S_IRUGO, alspshub_show_alsval, NULL);
-static DRIVER_ATTR(trace, S_IWUSR | S_IRUGO, alspshub_show_trace, alspshub_store_trace);
-static DRIVER_ATTR(reg, S_IWUSR | S_IRUGO, alspshub_show_reg, NULL);
+static DRIVER_ATTR_RO(als);
+static DRIVER_ATTR_RO(ps);
+static DRIVER_ATTR_RO(alslv);
+static DRIVER_ATTR_RO(alsval);
+static DRIVER_ATTR_RW(trace);
+static DRIVER_ATTR_RO(reg);
 static struct driver_attribute *alspshub_attr_list[] = {
 	&driver_attr_als,
 	&driver_attr_ps,
@@ -249,7 +275,8 @@ static int alspshub_create_attr(struct device_driver *driver)
 	for (idx = 0; idx < num; idx++) {
 		err = driver_create_file(driver, alspshub_attr_list[idx]);
 		if (err) {
-			APS_ERR("driver_create_file (%s) = %d\n", alspshub_attr_list[idx]->attr.name, err);
+			pr_err("driver_create_file (%s) = %d\n",
+				alspshub_attr_list[idx]->attr.name, err);
 			break;
 		}
 	}
@@ -274,71 +301,110 @@ static void alspshub_init_done_work(struct work_struct *work)
 {
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 	int err = 0;
+#ifndef MTK_OLD_FACTORY_CALIBRATION
+	int32_t cfg_data[2] = {0};
+#endif
 
 	if (atomic_read(&obj->scp_init_done) == 0) {
-		APS_ERR("wait for nvram to set calibration\n");
-	} else {
-		if (atomic_read(&obj->first_ready_after_boot) == 0) {
-			atomic_set(&obj->first_ready_after_boot, 1);
-		} else {
-			err = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_SET_CALI, &obj->ps_cali);
-			if (err < 0)
-				APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
-					ID_PROXIMITY, CUST_ACTION_SET_CALI);
-		}
+		pr_err("wait for nvram to set calibration\n");
+		return;
 	}
+	if (atomic_xchg(&obj->first_ready_after_boot, 1) == 0)
+		return;
+#ifdef MTK_OLD_FACTORY_CALIBRATION
+	err = sensor_set_cmd_to_hub(ID_PROXIMITY,
+		CUST_ACTION_SET_CALI, &obj->ps_cali);
+	if (err < 0)
+		pr_err("sensor_set_cmd_to_hub fail,(ID: %d),(action: %d)\n",
+			ID_PROXIMITY, CUST_ACTION_SET_CALI);
+#else
+	spin_lock(&calibration_lock);
+	cfg_data[0] = atomic_read(&obj->ps_thd_val_low);
+	cfg_data[1] = atomic_read(&obj->ps_thd_val_high);
+	spin_unlock(&calibration_lock);
+	err = sensor_cfg_to_hub(ID_PROXIMITY,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		pr_err("sensor_cfg_to_hub ps fail\n");
+
+	spin_lock(&calibration_lock);
+	cfg_data[0] = atomic_read(&obj->als_cali);
+	spin_unlock(&calibration_lock);
+	err = sensor_cfg_to_hub(ID_LIGHT,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		pr_err("sensor_cfg_to_hub als fail\n");
+#endif
 }
 static int ps_recv_data(struct data_unit_t *event, void *reserved)
 {
+	int err = 0;
+	int cali_data[4] = {0};
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
-	if (READ_ONCE(obj->ps_android_enable) == false)
+	if (!obj)
 		return 0;
 
-	if (!obj)
-		return -1;
-
 	if (event->flush_action == FLUSH_ACTION)
-		ps_flush_report();
-	else if (event->flush_action == DATA_ACTION)
-		ps_data_report(event->proximity_t.oneshot, SENSOR_STATUS_ACCURACY_HIGH);
-	return 0;
+		err = ps_flush_report();
+	else if (event->flush_action == DATA_ACTION &&
+			READ_ONCE(obj->ps_android_enable) == true) {
+		__pm_wakeup_event(&obj->ps_wake_lock, msecs_to_jiffies(100));
+		err = ps_data_report_t(event->proximity_t.oneshot,
+			SENSOR_STATUS_ACCURACY_HIGH,
+			(int64_t)event->time_stamp);
+	} else if (event->flush_action == CALI_ACTION) {
+		spin_lock(&calibration_lock);
+		obj->ps_thd_cali[2] = event->data[0];
+		obj->ps_thd_cali[3] = event->data[1];
+		cali_data[0] = obj->ps_thd_cali[0];
+		cali_data[1] = obj->ps_thd_cali[1];
+		cali_data[2] = obj->ps_thd_cali[2];
+		cali_data[3] = obj->ps_thd_cali[3];
+		spin_unlock(&calibration_lock);
+		complete(&obj->ps_calibration_done);
+		err = ps_cali_report(cali_data);
+	}
+	return err;
 }
 static int als_recv_data(struct data_unit_t *event, void *reserved)
 {
+	int err = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
-	if (READ_ONCE(obj->als_android_enable) == false)
+	if (!obj)
 		return 0;
 
 	if (event->flush_action == FLUSH_ACTION)
-		als_flush_report();
-	else if (event->flush_action == DATA_ACTION)
-		als_data_report(event->light, SENSOR_STATUS_ACCURACY_MEDIUM);
-	return 0;
+		err = als_flush_report();
+	else if ((event->flush_action == DATA_ACTION) &&
+			READ_ONCE(obj->als_android_enable) == true)
+		err = als_data_report_t(event->light,
+				SENSOR_STATUS_ACCURACY_MEDIUM,
+				(int64_t)event->time_stamp);
+	else if (event->flush_action == CALI_ACTION) {
+		spin_lock(&calibration_lock);
+		atomic_set(&obj->als_cali, event->data[0]);
+		spin_unlock(&calibration_lock);
+		err = als_cali_report(event->data);
+	}
+	return err;
 }
 
-static int set_psensor_threshold(void)
+static int rgbw_recv_data(struct data_unit_t *event, void *reserved)
 {
-	struct alspshub_ipi_data *obj = obj_ipi_data;
-	int res = 0;
-	int32_t ps_thd_val[2];
+	int err = 0;
 
-	ps_thd_val[0] = atomic_read(&obj->ps_thd_val_low);
-	ps_thd_val[1] = atomic_read(&obj->ps_thd_val_high);
-
-	ps_thd_val[0] -= obj->ps_cali;
-	ps_thd_val[1] -= obj->ps_cali;
-
-	res = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_SET_PS_THRESHOLD, ps_thd_val);
-	if (res < 0)
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
-			ID_PROXIMITY, CUST_ACTION_SET_PS_THRESHOLD);
-	return res;
-
+	if (event->flush_action == FLUSH_ACTION)
+		err = rgbw_flush_report();
+	else if (event->flush_action == DATA_ACTION)
+		err = rgbw_data_report_t(event->data,
+			(int64_t)event->time_stamp);
+	return err;
 }
 
-static int alshub_factory_enable_sensor(bool enable_disable, int64_t sample_periods_ms)
+static int alshub_factory_enable_sensor(bool enable_disable,
+				int64_t sample_periods_ms)
 {
 	int err = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
@@ -351,13 +417,13 @@ static int alshub_factory_enable_sensor(bool enable_disable, int64_t sample_peri
 	if (enable_disable == true) {
 		err = sensor_set_delay_to_hub(ID_LIGHT, sample_periods_ms);
 		if (err) {
-			APS_ERR("sensor_set_delay_to_hub failed!\n");
+			pr_err("sensor_set_delay_to_hub failed!\n");
 			return -1;
 		}
 	}
 	err = sensor_enable_to_hub(ID_LIGHT, enable_disable);
 	if (err) {
-		APS_ERR("sensor_enable_to_hub failed!\n");
+		pr_err("sensor_enable_to_hub failed!\n");
 		return -1;
 	}
 	mutex_lock(&alspshub_mutex);
@@ -391,15 +457,51 @@ static int alshub_factory_clear_cali(void)
 {
 	return 0;
 }
-static int alshub_factory_set_cali(int32_t offset)
+static int alshub_factory_set_cali(PS_CALI_DATA cali)
 {
-	return 0;
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+	int err = 0;
+	int32_t cfg_data[4] = {0};
+
+	pr_info("alshub_factory_set_cali [%d, %d, %d, %d]\n",
+		cali.threshold0, cali.threshold1,
+		cali.threshold2, cali.threshold3);
+	cfg_data[0] = cali.threshold0;
+	cfg_data[1] = cali.threshold1;
+	cfg_data[2] = cali.threshold2;
+	cfg_data[3] = cali.threshold3;
+
+	if (cfg_data[0] == AMBIENT_LCD_BACKLIGHT_HIGH) {
+		obj->backlight_high = cali.threshold1;
+		obj->high_bias = cali.threshold2;
+	} else if (cfg_data[0] == AMBIENT_LCD_BACKLIGHT_LOW) {
+		obj->backlight_low = cali.threshold1;
+		obj->low_bias = cali.threshold2;
+	} else if (cfg_data[0] == ALS_CALI_INFO_SET_SCALE) {
+		atomic_set(&obj->als_cali, cali.threshold1);
+	}
+
+	err = sensor_cfg_to_hub(ID_LIGHT,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		pr_err("sensor_cfg_to_hub fail\n");
+
+	if (cfg_data[0] == ALS_CALI_INFO_SET_SCALE) {
+		als_cali_report(&cfg_data[1]);
+	}
+
+	return err;
+
 }
 static int alshub_factory_get_cali(int32_t *offset)
 {
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+	*offset = atomic_read(&obj->als_cali);
+	pr_info("alshub_factory_get_cali *offset: %d!\n", *offset);
 	return 0;
 }
-static int pshub_factory_enable_sensor(bool enable_disable, int64_t sample_periods_ms)
+static int pshub_factory_enable_sensor(bool enable_disable,
+			int64_t sample_periods_ms)
 {
 	int err = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
@@ -407,13 +509,13 @@ static int pshub_factory_enable_sensor(bool enable_disable, int64_t sample_perio
 	if (enable_disable == true) {
 		err = sensor_set_delay_to_hub(ID_PROXIMITY, sample_periods_ms);
 		if (err) {
-			APS_ERR("sensor_set_delay_to_hub failed!\n");
+			pr_err("sensor_set_delay_to_hub failed!\n");
 			return -1;
 		}
 	}
 	err = sensor_enable_to_hub(ID_PROXIMITY, enable_disable);
 	if (err) {
-		APS_ERR("sensor_enable_to_hub failed!\n");
+		pr_err("sensor_enable_to_hub failed!\n");
 		return -1;
 	}
 	mutex_lock(&alspshub_mutex);
@@ -450,34 +552,28 @@ static int pshub_factory_enable_calibration(void)
 }
 static int pshub_factory_clear_cali(void)
 {
+#ifdef MTK_OLD_FACTORY_CALIBRATION
 	int err = 0;
+#endif
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
 	obj->ps_cali = 0;
-	err = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_RESET_CALI, &obj->ps_cali);
+#ifdef MTK_OLD_FACTORY_CALIBRATION
+	err = sensor_set_cmd_to_hub(ID_PROXIMITY,
+			CUST_ACTION_RESET_CALI, &obj->ps_cali);
 	if (err < 0) {
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
+		pr_err("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
 			ID_PROXIMITY, CUST_ACTION_RESET_CALI);
 		return -1;
 	}
+#endif
 	return 0;
 }
 static int pshub_factory_set_cali(int32_t offset)
 {
-#if 0
-	int err = 0;
-#endif
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
 	obj->ps_cali = offset;
-#if 0
-	err = sensor_set_cmd_to_hub(ID_PROXIMITY, CUST_ACTION_SET_CALI, &obj->ps_cali);
-	if (err < 0) {
-		APS_ERR("sensor_set_cmd_to_hub fail, (ID: %d),(action: %d)\n",
-		ID_PROXIMITY, CUST_ACTION_SET_CALI);
-		return -1;
-	}
-#endif
 	return 0;
 }
 static int pshub_factory_get_cali(int32_t *offset)
@@ -487,27 +583,98 @@ static int pshub_factory_get_cali(int32_t *offset)
 	*offset = obj->ps_cali;
 	return 0;
 }
-static int pshub_factory_set_threashold(int32_t threashold[2])
+static int pshub_factory_set_threshold(PS_CALI_DATA thd_cali)
 {
 	int err = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
+#if XIAOMI_FACTORY_CALIBRATION
+	int32_t cfg_data[4] = {0};
 
-	atomic_set(&obj->ps_thd_val_high, (threashold[0] + obj->ps_cali));
-	atomic_set(&obj->ps_thd_val_low, (threashold[1] + obj->ps_cali));
-	err = set_psensor_threshold();
-	if (err < 0) {
-		APS_ERR("set_psensor_threshold fail\n");
+	pr_err("pshub_factory_set_threshold [%d, %d, %d, %d]\n",
+		thd_cali.threshold0, thd_cali.threshold1,
+		thd_cali.threshold2, thd_cali.threshold3);
+
+	spin_lock(&calibration_lock);
+	obj->ps_thd_cali[0] = thd_cali.threshold0;
+	obj->ps_thd_cali[1] = thd_cali.threshold1;
+	obj->ps_thd_cali[2] = thd_cali.threshold2;
+	obj->ps_thd_cali[3] = thd_cali.threshold3;
+
+	cfg_data[0] = obj->ps_thd_cali[0];
+	cfg_data[1] = obj->ps_thd_cali[1];
+	cfg_data[2] = obj->ps_thd_cali[2];
+	cfg_data[3] = obj->ps_thd_cali[3];
+	spin_unlock(&calibration_lock);
+	err = sensor_cfg_to_hub(ID_PROXIMITY,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		pr_err("sensor_cfg_to_hub fail\n");
+
+	ps_cali_report(cfg_data);
+#else
+#ifndef MTK_OLD_FACTORY_CALIBRATION
+	int32_t cfg_data[4] = {0};
+#endif
+
+	spin_lock(&calibration_lock);
+	obj->ps_thd_cali[0] = thd_cali[0];
+	obj->ps_thd_cali[1] = thd_cali[1];
+	spin_unlock(&calibration_lock);
+#ifdef MTK_OLD_FACTORY_CALIBRATION
+	err = sensor_set_cmd_to_hub(ID_PROXIMITY,
+		CUST_ACTION_SET_PS_THRESHOLD, thd_cali);
+	if (err < 0)
+		pr_err("sensor_set_cmd_to_hub fail, (ID:%d),(action:%d)\n",
+			ID_PROXIMITY, CUST_ACTION_SET_PS_THRESHOLD);
+#else
+	spin_lock(&calibration_lock);
+	cfg_data[0] = obj->ps_thd_cali[0];
+	cfg_data[1] = obj->ps_thd_cali[1];
+	cfg_data[2] = obj->ps_thd_cali[2];
+	cfg_data[3] = obj->ps_thd_cali[3];
+	spin_unlock(&calibration_lock);
+	err = sensor_cfg_to_hub(ID_PROXIMITY,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+	if (err < 0)
+		pr_err("sensor_cfg_to_hub fail\n");
+
+	ps_cali_report(cfg_data);
+#endif
+#endif
+	return err;
+}
+
+static int pshub_factory_get_threshold(PS_CALI_DATA *thd_cali)
+{
+	int err = 0;
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+#if XIAOMI_FACTORY_CALIBRATION
+	pr_err("pshub_factory_get_threshold [%d, %d, %d, %d]\n",
+		obj->ps_thd_cali[0], obj->ps_thd_cali[1],
+		obj->ps_thd_cali[2], obj->ps_thd_cali[3]);
+
+	spin_lock(&calibration_lock);
+	thd_cali->threshold0 = obj->ps_thd_cali[0];
+	thd_cali->threshold1 = obj->ps_thd_cali[1];
+	thd_cali->threshold2 = obj->ps_thd_cali[2];
+	thd_cali->threshold3 = obj->ps_thd_cali[3];
+	spin_unlock(&calibration_lock);
+	return err;
+#else
+	err = wait_for_completion_timeout(&obj->ps_calibration_done,
+					  msecs_to_jiffies(3000));
+	if (!err) {
+		pr_err("get proximity cali fail\n");
 		return -1;
 	}
+	spin_lock(&calibration_lock);
+	thd_cali[0] = obj->ps_thd_cali[0];
+	thd_cali[1] = obj->ps_thd_cali[1];
+	thd_cali[2] = obj->ps_thd_cali[2];
+	thd_cali[3] = obj->ps_thd_cali[3];
+	spin_unlock(&calibration_lock);
 	return 0;
-}
-static int pshub_factory_get_threashold(int32_t threashold[2])
-{
-	struct alspshub_ipi_data *obj = obj_ipi_data;
-
-	threashold[0] = atomic_read(&obj->ps_thd_val_high) - obj->ps_cali;
-	threashold[1] = atomic_read(&obj->ps_thd_val_low) - obj->ps_cali;
-	return 0;
+#endif
 }
 
 static struct alsps_factory_fops alspshub_factory_fops = {
@@ -526,8 +693,8 @@ static struct alsps_factory_fops alspshub_factory_fops = {
 	.ps_clear_cali = pshub_factory_clear_cali,
 	.ps_set_cali = pshub_factory_set_cali,
 	.ps_get_cali = pshub_factory_get_cali,
-	.ps_set_threashold = pshub_factory_set_threashold,
-	.ps_get_threashold = pshub_factory_get_threashold,
+	.ps_set_threshold = pshub_factory_set_threshold,
+	.ps_get_threshold = pshub_factory_get_threshold,
 };
 
 static struct alsps_factory_public alspshub_factory_device = {
@@ -546,7 +713,7 @@ static int als_enable_nodata(int en)
 	int res = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
-	APS_LOG("obj_ipi_data als enable value = %d\n", en);
+	pr_debug("obj_ipi_data als enable value = %d\n", en);
 
 	if (en == true)
 		WRITE_ONCE(obj->als_android_enable, true);
@@ -555,7 +722,7 @@ static int als_enable_nodata(int en)
 
 	res = sensor_enable_to_hub(ID_LIGHT, en);
 	if (res < 0) {
-		APS_ERR("als_enable_nodata is failed!!\n");
+		pr_err("%s is failed!!\n", __func__);
 		return -1;
 	}
 
@@ -577,10 +744,10 @@ static int als_set_delay(u64 ns)
 	delayms = (unsigned int)ns / 1000 / 1000;
 	err = sensor_set_delay_to_hub(ID_LIGHT, delayms);
 	if (err) {
-		APS_ERR("als_set_delay fail!\n");
+		pr_err("%s fail!\n", __func__);
 		return err;
 	}
-	APS_LOG("als_set_delay (%d)\n", delayms);
+	pr_debug("%s (%d)\n", __func__, delayms);
 	return 0;
 #elif defined CONFIG_NANOHUB
 	return 0;
@@ -588,12 +755,14 @@ static int als_set_delay(u64 ns)
 	return 0;
 #endif
 }
-static int als_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+static int als_batch(int flag,
+	int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
 {
 #if defined CONFIG_MTK_SCP_SENSORHUB_V1
 	als_set_delay(samplingPeriodNs);
 #endif
-	return sensor_batch_to_hub(ID_LIGHT, flag, samplingPeriodNs, maxBatchReportLatencyNs);
+	return sensor_batch_to_hub(ID_LIGHT, flag,
+		samplingPeriodNs, maxBatchReportLatencyNs);
 }
 
 static int als_flush(void)
@@ -601,25 +770,108 @@ static int als_flush(void)
 	return sensor_flush_to_hub(ID_LIGHT);
 }
 
+static int als_set_cali(uint8_t *data, uint8_t count)
+{
+	int32_t *buf = (int32_t *)data;
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+	int32_t cfg_data[4] = {0};
+
+	pr_info("als_set_cali [%d, %d, %d, %d]\n",
+		buf[0], buf[1], buf[2], buf[3]);
+
+	cfg_data[0] = buf[0];
+	cfg_data[1] = buf[1];
+	cfg_data[2] = buf[2];
+	cfg_data[3] = buf[3];
+
+	if (cfg_data[0] == AMBIENT_LCD_BACKLIGHT_HIGH) {
+		obj->backlight_high = cfg_data[1];
+		obj->high_bias = cfg_data[2];
+	} else if (cfg_data[0] == AMBIENT_LCD_BACKLIGHT_LOW) {
+		obj->backlight_low = cfg_data[1];
+		obj->low_bias = cfg_data[2];
+	} else if (cfg_data[0] == ALS_CALI_INFO_SET_SCALE) {
+		spin_lock(&calibration_lock);
+		atomic_set(&obj->als_cali, buf[1]);
+		spin_unlock(&calibration_lock);
+		pr_info("als_set_cali buf: %d!\n", buf[1]);
+		pr_info("als_set_cali *offset: %d!\n", atomic_read(&obj->als_cali));
+	}
+
+	return sensor_cfg_to_hub(ID_LIGHT,
+		(uint8_t *)cfg_data, sizeof(cfg_data));
+}
+
+void cabc_backlight_value_notification(int backlight_value)
+{
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+	if (obj != NULL
+		&& backlight_value != obj->cabc_backlight_value) {
+		obj->cabc_backlight_value = backlight_value;
+		schedule_work(&obj->cabc_notify_work);
+	}
+}
+EXPORT_SYMBOL_GPL(cabc_backlight_value_notification);
+
+static void cabc_backlight_value_notification_work(struct work_struct *work)
+{
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+	int32_t cfg_data[4] = {0};
+	if (obj != NULL) {
+		cfg_data[0] = AMBIENT_LCD_BACKLIGHT_VALUE;
+		cfg_data[1] = obj->cabc_backlight_value;
+		cfg_data[2] = 0;
+		cfg_data[3] = 0;
+
+		pr_info("cabc_backlight_value_notification_work [%d, %d, %d, %d]\n",
+			cfg_data[0], cfg_data[1], cfg_data[2], cfg_data[3]);
+
+		sensor_cfg_to_hub(ID_LIGHT,
+			(uint8_t *)cfg_data, sizeof(cfg_data));
+	}
+}
+
+static int rgbw_enable(int en)
+{
+	int res = 0;
+
+	res = sensor_enable_to_hub(ID_RGBW, en);
+	if (res < 0) {
+		pr_err("%s is failed!!\n", __func__);
+		return -1;
+	}
+	return 0;
+}
+
+static int rgbw_batch(int flag, int64_t samplingPeriodNs,
+		int64_t maxBatchReportLatencyNs)
+{
+	return sensor_batch_to_hub(ID_RGBW,
+		flag, samplingPeriodNs, maxBatchReportLatencyNs);
+}
+
+static int rgbw_flush(void)
+{
+	return sensor_flush_to_hub(ID_RGBW);
+}
+
 static int als_get_data(int *value, int *status)
 {
 	int err = 0;
 	struct data_unit_t data;
 	uint64_t time_stamp = 0;
-	uint64_t time_stamp_gpt = 0;
 
 	err = sensor_get_data_from_hub(ID_LIGHT, &data);
 	if (err) {
-		APS_ERR("sensor_get_data_from_hub fail!\n");
+		pr_err("sensor_get_data_from_hub fail!\n");
 	} else {
 		time_stamp = data.time_stamp;
-		time_stamp_gpt = data.time_stamp_gpt;
 		*value = data.light;
 		*status = SENSOR_STATUS_ACCURACY_MEDIUM;
 	}
 
 	if (atomic_read(&obj_ipi_data->trace) & CMC_TRC_PS_DATA)
-		APS_LOG("value = %d\n", *value);
+		pr_debug("value = %d\n", *value);
 	return 0;
 }
 
@@ -633,7 +885,7 @@ static int ps_enable_nodata(int en)
 	int res = 0;
 	struct alspshub_ipi_data *obj = obj_ipi_data;
 
-	APS_LOG("obj_ipi_data als enable value = %d\n", en);
+	pr_debug("obj_ipi_data als enable value = %d\n", en);
 	if (en == true)
 		WRITE_ONCE(obj->ps_android_enable, true);
 	else
@@ -641,7 +893,7 @@ static int ps_enable_nodata(int en)
 
 	res = sensor_enable_to_hub(ID_PROXIMITY, en);
 	if (res < 0) {
-		APS_ERR("als_enable_nodata is failed!!\n");
+		pr_err("als_enable_nodata is failed!!\n");
 		return -1;
 	}
 
@@ -666,11 +918,11 @@ static int ps_set_delay(u64 ns)
 	delayms = (unsigned int)ns / 1000 / 1000;
 	err = sensor_set_delay_to_hub(ID_PROXIMITY, delayms);
 	if (err < 0) {
-		APS_ERR("ps_set_delay fail!\n");
+		pr_err("%s fail!\n", __func__);
 		return err;
 	}
 
-	APS_LOG("ps_set_delay (%d)\n", delayms);
+	pr_debug("%s (%d)\n", __func__, delayms);
 	return 0;
 #elif defined CONFIG_NANOHUB
 	return 0;
@@ -678,12 +930,14 @@ static int ps_set_delay(u64 ns)
 	return 0;
 #endif
 }
-static int ps_batch(int flag, int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
+static int ps_batch(int flag,
+	int64_t samplingPeriodNs, int64_t maxBatchReportLatencyNs)
 {
 #if defined CONFIG_MTK_SCP_SENSORHUB_V1
 	ps_set_delay(samplingPeriodNs);
 #endif
-	return sensor_batch_to_hub(ID_PROXIMITY, flag, samplingPeriodNs, maxBatchReportLatencyNs);
+	return sensor_batch_to_hub(ID_PROXIMITY, flag,
+		samplingPeriodNs, maxBatchReportLatencyNs);
 }
 
 static int ps_flush(void)
@@ -696,25 +950,40 @@ static int ps_get_data(int *value, int *status)
 	int err = 0;
 	struct data_unit_t data;
 	uint64_t time_stamp = 0;
-	uint64_t time_stamp_gpt = 0;
 
 	err = sensor_get_data_from_hub(ID_PROXIMITY, &data);
 	if (err < 0) {
-		APS_ERR("sensor_get_data_from_hub fail!\n");
+		pr_err("sensor_get_data_from_hub fail!\n");
 		*value = -1;
 		err = -1;
 	} else {
 		time_stamp = data.time_stamp;
-		time_stamp_gpt = data.time_stamp_gpt;
 		*value = data.proximity_t.oneshot;
 		*status = SENSOR_STATUS_ACCURACY_MEDIUM;
 	}
 
 	if (atomic_read(&obj_ipi_data->trace) & CMC_TRC_PS_DATA)
-		APS_LOG("value = %d\n", *value);
+		pr_debug("value = %d\n", *value);
 
 	return err;
 }
+
+static int ps_set_cali(uint8_t *data, uint8_t count)
+{
+	int32_t *buf = (int32_t *)data;
+	struct alspshub_ipi_data *obj = obj_ipi_data;
+
+	spin_lock(&calibration_lock);
+
+
+	obj->ps_thd_cali[0] = buf[0];
+	obj->ps_thd_cali[1] = buf[1];
+	obj->ps_thd_cali[2] = buf[2];
+	obj->ps_thd_cali[3] = buf[3];
+	spin_unlock(&calibration_lock);
+	return sensor_cfg_to_hub(ID_PROXIMITY, data, count);
+}
+
 static int scp_ready_event(uint8_t event, void *ptr)
 {
 	struct alspshub_ipi_data *obj = obj_ipi_data;
@@ -723,10 +992,10 @@ static int scp_ready_event(uint8_t event, void *ptr)
 	case SENSOR_POWER_UP:
 	    atomic_set(&obj->scp_init_done, 1);
 		schedule_work(&obj->init_done_work);
-	    break;
+		break;
 	case SENSOR_POWER_DOWN:
 	    atomic_set(&obj->scp_init_done, 0);
-	    break;
+		break;
 	}
 	return 0;
 }
@@ -739,6 +1008,8 @@ static struct scp_power_monitor scp_ready_notifier = {
 static int alspshub_probe(struct platform_device *pdev)
 {
 	struct alspshub_ipi_data *obj;
+	struct platform_driver *paddr =
+			alspshub_init_info.platform_diver_addr;
 
 	int err = 0;
 	struct als_control_path als_ctl = { 0 };
@@ -746,7 +1017,7 @@ static int alspshub_probe(struct platform_device *pdev)
 	struct ps_control_path ps_ctl = { 0 };
 	struct ps_data_path ps_data = { 0 };
 
-	APS_FUN();
+	pr_debug("%s\n", __func__);
 	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
 	if (!obj) {
 		err = -ENOMEM;
@@ -757,6 +1028,8 @@ static int alspshub_probe(struct platform_device *pdev)
 	obj_ipi_data = obj;
 
 	INIT_WORK(&obj->init_done_work, alspshub_init_done_work);
+	INIT_WORK(&obj->cabc_notify_work, cabc_backlight_value_notification_work);
+	obj->cabc_backlight_value = -1;
 
 	platform_set_drvdata(pdev, obj);
 
@@ -777,28 +1050,35 @@ static int alspshub_probe(struct platform_device *pdev)
 
 	clear_bit(CMC_BIT_ALS, &obj->enable);
 	clear_bit(CMC_BIT_PS, &obj->enable);
+	init_completion(&obj->ps_calibration_done);
+
 	scp_power_monitor_register(&scp_ready_notifier);
 	err = scp_sensorHub_data_registration(ID_PROXIMITY, ps_recv_data);
 	if (err < 0) {
-		APS_ERR("scp_sensorHub_data_registration failed\n");
+		pr_err("scp_sensorHub_data_registration failed\n");
 		goto exit_kfree;
 	}
 	err = scp_sensorHub_data_registration(ID_LIGHT, als_recv_data);
 	if (err < 0) {
-		APS_ERR("scp_sensorHub_data_registration failed\n");
+		pr_err("scp_sensorHub_data_registration failed\n");
+		goto exit_kfree;
+	}
+	err = scp_sensorHub_data_registration(ID_RGBW, rgbw_recv_data);
+	if (err < 0) {
+		pr_err("scp_sensorHub_data_registration failed\n");
 		goto exit_kfree;
 	}
 	err = alsps_factory_device_register(&alspshub_factory_device);
 	if (err) {
-		APS_ERR("alsps_factory_device_register register failed\n");
+		pr_err("alsps_factory_device_register register failed\n");
 		goto exit_kfree;
 	}
-	APS_LOG("alspshub_misc_device misc_register OK!\n");
+	pr_debug("alspshub_misc_device misc_register OK!\n");
 	als_ctl.is_use_common_factory = false;
 	ps_ctl.is_use_common_factory = false;
-	err = alspshub_create_attr(&(alspshub_init_info.platform_diver_addr->driver));
+	err = alspshub_create_attr(&paddr->driver);
 	if (err) {
-		APS_ERR("create attribute err = %d\n", err);
+		pr_err("create attribute err = %d\n", err);
 		goto exit_create_attr_failed;
 	}
 	als_ctl.open_report_data = als_open_report_data;
@@ -806,13 +1086,17 @@ static int alspshub_probe(struct platform_device *pdev)
 	als_ctl.set_delay = als_set_delay;
 	als_ctl.batch = als_batch;
 	als_ctl.flush = als_flush;
+	als_ctl.set_cali = als_set_cali;
+	als_ctl.rgbw_enable = rgbw_enable;
+	als_ctl.rgbw_batch = rgbw_batch;
+	als_ctl.rgbw_flush = rgbw_flush;
 	als_ctl.is_report_input_direct = false;
 
 	als_ctl.is_support_batch = false;
 
 	err = als_register_control_path(&als_ctl);
 	if (err) {
-		APS_ERR("register fail = %d\n", err);
+		pr_err("register fail = %d\n", err);
 		goto exit_create_attr_failed;
 	}
 
@@ -820,7 +1104,7 @@ static int alspshub_probe(struct platform_device *pdev)
 	als_data.vender_div = 100;
 	err = als_register_data_path(&als_data);
 	if (err) {
-		APS_ERR("tregister fail = %d\n", err);
+		pr_err("tregister fail = %d\n", err);
 		goto exit_create_attr_failed;
 	}
 
@@ -829,13 +1113,14 @@ static int alspshub_probe(struct platform_device *pdev)
 	ps_ctl.set_delay = ps_set_delay;
 	ps_ctl.batch = ps_batch;
 	ps_ctl.flush = ps_flush;
+	ps_ctl.set_cali = ps_set_cali;
 	ps_ctl.is_report_input_direct = false;
 
 	ps_ctl.is_support_batch = false;
 
 	err = ps_register_control_path(&ps_ctl);
 	if (err) {
-		APS_ERR("register fail = %d\n", err);
+		pr_err("register fail = %d\n", err);
 		goto exit_create_attr_failed;
 	}
 
@@ -843,12 +1128,13 @@ static int alspshub_probe(struct platform_device *pdev)
 	ps_data.vender_div = 100;
 	err = ps_register_data_path(&ps_data);
 	if (err) {
-		APS_ERR("tregister fail = %d\n", err);
+		pr_err("tregister fail = %d\n", err);
 		goto exit_create_attr_failed;
 	}
+	wakeup_source_init(&obj->ps_wake_lock, "ps_wake_lock");
 
 	alspshub_init_flag = 0;
-	APS_LOG("%s: OK\n", __func__);
+	pr_debug("%s: OK\n", __func__);
 	return 0;
 
 exit_create_attr_failed:
@@ -857,7 +1143,7 @@ exit_kfree:
 	kfree(obj);
 	obj_ipi_data = NULL;
 exit:
-	APS_ERR("%s: err = %d\n", __func__, err);
+	pr_err("%s: err = %d\n", __func__, err);
 	alspshub_init_flag = -1;
 	return err;
 }
@@ -865,10 +1151,12 @@ exit:
 static int alspshub_remove(struct platform_device *pdev)
 {
 	int err = 0;
+	struct platform_driver *paddr =
+			alspshub_init_info.platform_diver_addr;
 
-	err = alspshub_delete_attr(&(alspshub_init_info.platform_diver_addr->driver));
+	err = alspshub_delete_attr(&paddr->driver);
 	if (err)
-		APS_ERR("alspshub_delete_attr fail: %d\n", err);
+		pr_err("alspshub_delete_attr fail: %d\n", err);
 	alsps_factory_device_deregister(&alspshub_factory_device);
 	kfree(platform_get_drvdata(pdev));
 	return 0;
@@ -877,13 +1165,13 @@ static int alspshub_remove(struct platform_device *pdev)
 
 static int alspshub_suspend(struct platform_device *pdev, pm_message_t msg)
 {
-	APS_FUN();
+	pr_debug("%s\n", __func__);
 	return 0;
 }
 
 static int alspshub_resume(struct platform_device *pdev)
 {
-	APS_FUN();
+	pr_debug("%s\n", __func__);
 	return 0;
 }
 static struct platform_device alspshub_device = {
@@ -905,7 +1193,7 @@ static int alspshub_local_init(void)
 {
 
 	if (platform_driver_register(&alspshub_driver)) {
-		APS_ERR("add driver error\n");
+		pr_err("add driver error\n");
 		return -1;
 	}
 	if (-1 == alspshub_init_flag)
@@ -922,7 +1210,7 @@ static int alspshub_local_remove(void)
 static int __init alspshub_init(void)
 {
 	if (platform_device_register(&alspshub_device)) {
-		APS_ERR("alsps platform device error\n");
+		pr_err("alsps platform device error\n");
 		return -1;
 	}
 	alsps_driver_add(&alspshub_init_info);
@@ -931,7 +1219,7 @@ static int __init alspshub_init(void)
 
 static void __exit alspshub_exit(void)
 {
-	APS_FUN();
+	pr_debug("%s\n", __func__);
 }
 
 module_init(alspshub_init);

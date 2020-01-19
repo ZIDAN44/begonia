@@ -14,11 +14,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -47,25 +42,43 @@
 #include <linux/usb.h>
 #include <linux/usb/otg.h>
 #include <linux/usb/musb.h>
-#include <linux/wakelock.h>
+#include <linux/pm_wakeup.h>
 #include <linux/workqueue.h>
+#if !defined(CONFIG_MTK_GAUGE_VERSION) || defined(CONFIG_FPGA_EARLY_PORTING)
+enum charger_type {
+	CHARGER_UNKNOWN = 0,
+	STANDARD_HOST,		/* USB : 450mA */
+	CHARGING_HOST,
+	NONSTANDARD_CHARGER,	/* AC : 450mA~1A */
+	STANDARD_CHARGER,	/* AC : ~1A */
+	APPLE_2_1A_CHARGER, /* 2.1A apple charger */
+	APPLE_1_0A_CHARGER, /* 1A apple charger */
+	APPLE_0_5A_CHARGER, /* 0.5A apple charger */
+	WIRELESS_CHARGER,
+};
+#else
 /*#include <mt-plat/battery_common.h>*/
+#if (CONFIG_MTK_GAUGE_VERSION != 30)
 #include <mt-plat/charging.h>
+#endif
+#if (CONFIG_MTK_GAUGE_VERSION == 30)
+#include <mt-plat/charger_type.h>
+#endif
+#endif
+
 
 struct musb;
 struct musb_hw_ep;
 struct musb_ep;
 
-#ifdef CONFIG_MTK_KERNEL_POWER_OFF_CHARGING
-#include <mt-plat/mt_boot_common.h>
-#endif
-extern u32 fake_CDP;
+#include <mt-plat/mtk_boot_common.h>
+extern int fake_CDP;
 extern unsigned int musb_speed;
 
 extern struct musb *_mu3d_musb;
 #if defined(CONFIG_MTK_SMART_BATTERY) && !defined(FOR_BRING_UP)
 extern void BATTERY_SetUSBState(int usb_state_value);
-extern CHARGER_TYPE mt_get_charger_type(void);
+extern enum charger_type mt_get_charger_type(void);
 #endif
 /* Helper defines for struct musb->hwvers */
 #define MUSB_HWVERS_MAJOR(x)	((x >> 10) & 0x1f)
@@ -88,12 +101,11 @@ extern CHARGER_TYPE mt_get_charger_type(void);
 
 /* #define U3_COMPLIANCE */
 
-#if defined(CONFIG_USB_MU3D_ONLY_U2_MODE)
-#define USB_GADGET_DUALSPEED
-#else
+#ifdef SUPPORT_U3
 #define USB_GADGET_SUPERSPEED
+#else
+#define USB_GADGET_DUALSPEED
 #endif
-
 #define EP_PROFILING
 
 #define MUSB_DRIVER_NAME "musb-hdrc"
@@ -145,11 +157,15 @@ extern void musb_g_resume(struct musb *);
 extern void musb_g_wakeup(struct musb *);
 extern void musb_g_disconnect(struct musb *);
 #ifdef CONFIG_DEBUG_FS
-#ifndef USB_ELBRUS
 extern unsigned musb_uart_debug;
 extern int usb20_phy_init_debugfs(void);
 #endif
+#ifdef CONFIG_PHY_MTK_SSUSB
+extern int ssusb_phy_init_debugfs(struct phy *mtk_phy);
+extern int ssusb_phy_exit_debugfs(void);
+extern void init_phy_hal(struct phy *phy);
 #endif
+
 /****************************** HOST ROLE ***********************************/
 
 #define	is_host_capable()	(1)
@@ -169,18 +185,18 @@ extern void musb_host_rx(struct musb *, u8);
 #endif
 
 /* USB working mode */
-typedef enum {
+enum cable_mode {
 	CABLE_MODE_CHRG_ONLY = 0,
 	CABLE_MODE_NORMAL,
 	CABLE_MODE_HOST_ONLY,
 	CABLE_MODE_MAX
-} CABLE_MODE;
+};
 
-typedef enum {
+enum usb_state_enum {
 	USB_SUSPEND = 0,
 	USB_UNCONFIGURED,
 	USB_CONFIGURED
-} usb_state_enum;
+};
 
 /* host side ep0 states */
 enum musb_h_ep0_state {
@@ -515,6 +531,7 @@ struct musb {
 	u16 int_tx;
 
 	struct usb_phy *xceiv;
+	struct phy *mtk_phy;
 
 	int nIrq;
 	unsigned irq_wake:1;
@@ -574,7 +591,6 @@ struct musb {
 
 	u8 address;
 	u8 test_mode_nr;
-	bool in_ipo_off;
 	u32 ackpend;		/* ep0 *//*We don't maintain Max Packet size in it. */
 	enum musb_g_ep0_state ep0_state;
 	struct usb_gadget g;	/* the gadget */
@@ -608,10 +624,9 @@ struct musb {
 	unsigned is_clk_on;
 	unsigned usb_mode;
 	unsigned active_ep;
-	CHARGER_TYPE charger_mode;
+	enum charger_type charger_mode;
 	struct work_struct suspend_work;
-	struct wake_lock usb_wakelock;
-	struct delayed_work connection_work;
+	struct wakeup_source usb_wakelock;
 	struct delayed_work check_ltssm_work;
 #ifndef CONFIG_USBIF_COMPLIANCE
 	struct delayed_work reconnect_work;
@@ -628,6 +643,7 @@ struct musb {
 	u32 error_wQmuVal;
 	u32 error_wErrVal;
 #endif
+	struct workqueue_struct *st_wq;
 };
 
 static inline struct musb *gadget_to_musb(struct usb_gadget *g)
@@ -771,6 +787,13 @@ static inline int musb_platform_exit(struct musb *musb)
 	return musb->ops->exit(musb);
 }
 
+#ifdef CONFIG_DUAL_ROLE_USB_INTF
+extern void mt_usb_dual_role_to_none(void);
+extern void mt_usb_dual_role_to_device(void);
+extern void mt_usb_dual_role_to_host(void);
+extern int mt_usb_dual_role_init(struct musb *musb);
+#endif
+
 extern bool usb_cable_connected(void);
 extern void usb_phy_savecurrent(unsigned int clk_on);
 extern void usb_phy_recover(unsigned int clk_on);
@@ -815,6 +838,10 @@ extern void usb_phy_switch_to_uart(void);
 extern ssize_t musb_cmode_show(struct device *dev, struct device_attribute *attr, char *buf);
 extern ssize_t musb_cmode_store(struct device *dev, struct device_attribute *attr, const char *buf,
 				size_t count);
+extern ssize_t musb_saving_mode_show(struct device *dev, struct device_attribute *attr, char *buf);
+extern ssize_t musb_saving_mode_store(struct device *dev, struct device_attribute *attr, const char *buf,
+				size_t count);
+extern bool is_saving_mode(void);
 
 extern void usb20_pll_settings(bool host, bool forceOn);
 
@@ -823,20 +850,27 @@ extern u32 upmu_get_rgs_chrdet(void);
 
 #ifdef CONFIG_USB_MTK_DUALMODE
 extern bool mtk_is_host_mode(void);
-extern void mtk_unload_xhci_on_ipo(void);
-extern void switch_int_to_host_and_mask(void);
-extern void switch_int_to_host(void);
+
 #else
 static inline int mtk_is_host_mode(void)
 {
 	return 0;
 }
 #endif
-#ifdef CONFIG_USB_C_SWITCH
-extern int typec_switch_usb_disconnect(void *data);
-extern int typec_switch_usb_connect(void *data);
-#endif
 extern int mu3d_force_on;
 extern void mt_usb_connect(void);
+extern void mt_usb_disconnect(void);
+extern void mt_usb_reconnect(void);
 extern void mt_usb_connect_test(int start);
+extern void trigger_disconnect_check_work(void);
+/* specific USB operation */
+enum CONNECTION_OPS {
+	CONNECTION_OPS_DISC = 0,
+	CONNECTION_OPS_CHECK,
+	CONNECTION_OPS_CONN
+};
+struct mt_usb_work {
+	struct delayed_work dwork;
+	int ops;
+};
 #endif	/* __MUSB_CORE_H__ */

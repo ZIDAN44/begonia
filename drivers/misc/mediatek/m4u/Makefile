@@ -13,12 +13,7 @@
 
 obj-y += $(subst ",,$(CONFIG_MTK_PLATFORM))/
 
-obj-$(CONFIG_ARCH_MT6570) += 2.0/
-obj-$(CONFIG_ARCH_MT6580) += 2.0/
-obj-$(CONFIG_ARCH_MT6735) += 2.0/
-obj-$(CONFIG_ARCH_MT6735M) += 2.0/
-obj-$(CONFIG_ARCH_MT6753) += 2.0/
-obj-$(CONFIG_ARCH_MT6755) += 2.0/
-obj-$(CONFIG_ARCH_MT6797) += 2.0/
-obj-$(CONFIG_ARCH_MT6757) += 2.0/
-obj-$(CONFIG_ARCH_ELBRUS) += 2.0/
+obj-$(CONFIG_MACH_MT6771) += 2.4/
+obj-$(CONFIG_MACH_MT6768) += 2.0/
+obj-$(CONFIG_MACH_MT8168) += 2.4/
+obj-$(CONFIG_MACH_MT6785) += 3.2/

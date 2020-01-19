@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2016 MediaTek Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -14,312 +14,211 @@
 #include <linux/kernel.h>
 #include <linux/module.h>
 #include <linux/device.h>
-#include <linux/cpumask.h>
-#include <linux/list.h>
 #include <linux/printk.h>
 #include <linux/platform_device.h>
-#include <linux/kallsyms.h>
 #include <linux/of_address.h>
-#include <linux/slab.h>
 #include <linux/io.h>
-#include <mt-plat/mt_chip.h>
-#include <mt-plat/mt_debug_latch.h>
 #include "lastbus.h"
 
+struct plt_cfg_bus_latch *lastbus_ctrl;
+static int lastbus_probe(struct platform_device *pdev);
+
+/* #define LASTBUS_SYS */
+
+#define NUM_INFRA_EVENT_REG (lastbus_ctrl->num_infra_event_reg)
+#define NUM_PERI_EVENT_REG (lastbus_ctrl->num_peri_event_reg)
+
+int lastbus_setup(struct plt_cfg_bus_latch *p)
+{
+	lastbus_ctrl = p;
+	return 0;
+}
+
+
 static const struct of_device_id lastbus_of_ids[] = {
+	{   .compatible = "mediatek,lastbus-v1", },
 	{}
 };
 
-static int lastbus_probe(struct platform_device *pdev);
-static int lastbus_remove(struct platform_device *pdev);
-static int lastbus_suspend(struct platform_device *pdev, pm_message_t state);
-static int lastbus_resume(struct platform_device *pdev);
-
-static char *lastbus_dump_buf;
-
-static struct lastbus lastbus_drv = {
-	.plt_drv = {
-		.driver = {
-			.name = "lastbus",
-			.bus = &platform_bus_type,
-			.owner = THIS_MODULE,
-			.of_match_table = lastbus_of_ids,
-		},
-		.probe = lastbus_probe,
-		.remove = lastbus_remove,
-		.suspend = lastbus_suspend,
-		.resume = lastbus_resume,
+static struct platform_driver lastbus_drv = {
+	.driver = {
+		.name = "lastbus",
+		.bus = &platform_bus_type,
+		.owner = THIS_MODULE,
+		.of_match_table = lastbus_of_ids,
 	},
+	.probe = lastbus_probe,
 };
 
-static int lastbus_probe(struct platform_device *pdev)
-{
-	struct lastbus_plt *plt = NULL;
-
-	pr_debug("%s:%d: enter\n", __func__, __LINE__);
-
-	plt = lastbus_drv.cur_plt;
-
-	if (plt && plt->ops && plt->ops->probe)
-		return plt->ops->probe(plt, pdev);
-
-	lastbus_drv.mcu_base = of_iomap(pdev->dev.of_node, 0);
-	lastbus_drv.peri_base = of_iomap(pdev->dev.of_node, 1);
-	if (!lastbus_drv.mcu_base || !lastbus_drv.peri_base)
-		return -ENODEV;
-
-	return 0;
-}
-
-static int lastbus_remove(struct platform_device *pdev)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	pr_debug("%s:%d: enter\n", __func__, __LINE__);
-
-	if (plt && plt->ops && plt->ops->remove)
-		return plt->ops->remove(plt, pdev);
-
-	return 0;
-}
-
-static int lastbus_suspend(struct platform_device *pdev, pm_message_t state)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	pr_debug("%s:%d: enter\n", __func__, __LINE__);
-
-	if (plt && plt->ops && plt->ops->suspend)
-		return plt->ops->suspend(plt, pdev, state);
-
-	return 0;
-}
-
-static int lastbus_resume(struct platform_device *pdev)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	pr_debug("%s:%d: enter\n", __func__, __LINE__);
-
-	if (plt && plt->ops && plt->ops->resume)
-		return plt->ops->resume(plt, pdev);
-
-	return 0;
-}
-
-int lastbus_register(struct lastbus_plt *plt)
-{
-	if (!plt) {
-		pr_warn("%s%d: plt is NULL\n", __func__, __LINE__);
-		return -EINVAL;
-	}
-
-	plt->common = &lastbus_drv;
-	lastbus_drv.cur_plt = plt;
-
-	return 0;
-}
-
-int lastbus_dump(char *buf, int len)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	if (!buf) {
-		pr_warn("%s:%d: buf is NULL\n", __func__, __LINE__);
-		return -EINVAL;
-	}
-
-	if (!plt) {
-		pr_warn("%s:%d: plt is NULL\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	if (!plt->common) {
-		pr_warn("%s:%d: plt->common is NULL\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	if (!plt->common->mcu_base)
-		pr_warn("%s:%d: plt->common->mcu_base is NULL\n", __func__, __LINE__);
-
-	if (!plt->common->peri_base)
-		pr_warn("%s:%d: plt->common->peri_base is NULL\n", __func__, __LINE__);
-
-	if (!plt->common->mcu_base && !plt->common->peri_base)
-		return -ENODEV;
-
-	if (plt->ops && plt->ops->dump)
-		return plt->ops->dump(plt, buf, len);
-
-	pr_warn("no dump function implemented\n");
-
-	return 0;
-}
-
-int lastbus_enable(void)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	if (!plt) {
-		pr_warn("%s:%d: plt is NULL\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	if (!plt->common) {
-		pr_warn("%s:%d: plt->common is NULL\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	if (!plt->common->mcu_base)
-		pr_warn("%s:%d: plt->common->mcu_base is NULL\n", __func__, __LINE__);
-
-	if (!plt->common->peri_base)
-		pr_warn("%s:%d: plt->common->peri_base is NULL\n", __func__, __LINE__);
-
-	if (!plt->common->mcu_base && !plt->common->peri_base)
-		return -ENODEV;
-
-	if (plt->ops && plt->ops->enable)
-		return plt->ops->enable(plt);
-
-	pr_warn("no enable function implemented\n");
-
-	return 0;
-}
-
-int lastbus_dump_min_len(void)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	if (!plt) {
-		pr_warn("%s:%d: plt is NULL\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	if (!plt->min_buf_len)
-		pr_warn("%s:%d: min_buf_len is 0\n", __func__, __LINE__);
-
-	return plt->min_buf_len;
-}
-
-int mt_lastbus_dump(char *buf)
-{
-	strncpy(buf, lastbus_dump_buf, strlen(lastbus_dump_buf)+1);
-	return 0;
-}
-
+#ifdef LASTBUS_SYS
 static ssize_t lastbus_dump_show(struct device_driver *driver, char *buf)
 {
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-	int ret = 0;
+	unsigned int wp = 0;
 
-	ret = plt->ops->dump(plt, buf, -1);
-	if (ret)
-		pr_err("%s:%d: dump failed\n", __func__, __LINE__);
+	if (lastbus_ctrl->perisys_ops.dump)
+		wp += lastbus_ctrl->perisys_ops.dump(lastbus_ctrl, buf, &wp);
+
+	if (lastbus_ctrl->infrasys_ops.dump)
+		wp += lastbus_ctrl->infrasys_ops.dump(lastbus_ctrl, buf, &wp);
 
 	return strlen(buf);
 }
 
-static ssize_t lastbus_dump_store(struct device_driver *driver, const char *buf, size_t count)
+DRIVER_ATTR_RO(lastbus_dump);
+
+
+
+static ssize_t
+infra_event_store(struct device_driver *driver, const char *buf, size_t count)
 {
-	return count;
-}
+	int ret = 0;
 
-DRIVER_ATTR(lastbus_dump, 0664, lastbus_dump_show, lastbus_dump_store);
+	if (lastbus_ctrl->infrasys_ops.set_event)
+		ret = lastbus_ctrl->infrasys_ops.set_event(lastbus_ctrl, buf);
 
-static ssize_t lastbus_test_show(struct device_driver *driver, char *buf)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-
-	if (plt && plt->ops)
-		return plt->ops->test_show(buf);
-
-	return -ENODEV;
-}
-
-static ssize_t lastbus_test_store(struct device_driver *driver, const char *buf, size_t count)
-{
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
-	char *p = (char *)buf;
-	unsigned long num = 0;
-
-	if (kstrtoul(p, 10, &num) != 0) {
-		pr_err("%s:%d: kstrtoul fail for %s\n", __func__, __LINE__, p);
-		return 0;
-	}
-
-	if (plt && plt->ops && (plt->ops->test(plt, num) != 0))
-		pr_err("%s:%d: test failed\n", __func__, __LINE__);
+	if (ret < 0)
+		pr_notice("lastbus: peri-event set error\n");
 
 	return count;
 }
 
-DRIVER_ATTR(lastbus_test, 0664, lastbus_test_show, lastbus_test_store);
-
-static int lastbus_start(void)
+static ssize_t infra_event_show(struct device_driver *driver, char *buf)
 {
-	struct lastbus_plt *plt = lastbus_drv.cur_plt;
+	ssize_t len = 0;
 
-	if (!plt)
-		return -ENODEV;
+	if (lastbus_ctrl->infrasys_ops.get_event)
+		len = lastbus_ctrl->infrasys_ops.get_event(lastbus_ctrl, buf);
 
-	if (!plt->ops) {
-		pr_err("%s:%d: ops not installed\n", __func__, __LINE__);
-		return -ENODEV;
+	if (len < 0)
+		pr_notice("lastbus: peri-event get event error\n");
+
+	return len;
+}
+
+
+DRIVER_ATTR_RW(infra_event);
+
+
+static ssize_t
+lastbus_timeout_store(struct device_driver *driver,
+	const char *buf, size_t count)
+{
+	int ret = 0;
+
+	if (lastbus_ctrl->infrasys_ops.set_timeout)
+		ret = lastbus_ctrl->infrasys_ops.set_timeout(lastbus_ctrl, buf);
+
+	if (ret < 0)
+		pr_notice("lastbus: set timeout error\n");
+
+	return count;
+}
+
+static ssize_t lastbus_timeout_show(struct device_driver *driver, char *buf)
+{
+	ssize_t len = 0;
+
+	if (lastbus_ctrl->infrasys_ops.get_timeout)
+		len = lastbus_ctrl->infrasys_ops.get_timeout(lastbus_ctrl, buf);
+
+	if (len < 0)
+		pr_notice("lastbus: get timeout error\n");
+
+	return len;
+}
+
+
+DRIVER_ATTR_RW(lastbus_timeout);
+
+
+static ssize_t
+peri_event_store(struct device_driver *driver,
+	const char *buf, size_t count)
+{
+	int ret = 0;
+
+	if (lastbus_ctrl->perisys_ops.set_event)
+		ret = lastbus_ctrl->perisys_ops.set_event(lastbus_ctrl, buf);
+
+	if (ret < 0)
+		pr_notice("lastbus: peri-event set error\n");
+
+	return count;
+}
+
+static ssize_t peri_event_show(struct device_driver *driver, char *buf)
+{
+	int len = 0;
+
+	if (lastbus_ctrl->perisys_ops.get_event)
+		len = lastbus_ctrl->perisys_ops.get_event(lastbus_ctrl, buf);
+
+	if (len < 0)
+		pr_notice("lastbus: peri-event get event error\n");
+
+	return len;
+}
+
+
+DRIVER_ATTR_RW(peri_event);
+#endif
+
+static int lastbus_probe(struct platform_device *pdev)
+{
+#ifdef LASTBUS_SYS
+	int ret = 0;
+#endif
+
+	pr_debug("%s:%d: enter\n", __func__, __LINE__);
+	if (lastbus_ctrl->init)
+		lastbus_ctrl->init(lastbus_ctrl);
+	else {
+		lastbus_ctrl->infra_base = of_iomap(pdev->dev.of_node, 0);
+		if (!lastbus_ctrl->infra_base) {
+			pr_info("can't of_iomap for infra lastbus!!\n");
+			return -ENOMEM;
+		}
+
+		lastbus_ctrl->peri_base = of_iomap(pdev->dev.of_node, 1);
+		if (!lastbus_ctrl->peri_base) {
+			pr_info("can't of_iomap for peri lastbus!!\n");
+			return -ENOMEM;
+		}
+
 	}
 
-	if (plt->ops->start)
-		return plt->ops->start(plt);
+
+#ifdef LASTBUS_SYS
+	ret  = driver_create_file(&lastbus_drv.driver,
+			&driver_attr_lastbus_dump);
+	ret  |= driver_create_file(&lastbus_drv.driver,
+			&driver_attr_infra_event);
+	ret  |= driver_create_file(&lastbus_drv.driver,
+			&driver_attr_peri_event);
+	ret  |= driver_create_file(&lastbus_drv.driver,
+			&driver_attr_lastbus_timeout);
+
+	if (ret)
+		pr_info("last bus create file failed\n");
+#endif
 
 	return 0;
 }
 
 static int __init lastbus_init(void)
 {
-	struct device_node *node;
-	int ret = 0;
+	int err = 0;
 
-	node = of_find_compatible_node(NULL, NULL, "mediatek,lastbus");
-	if (node) {
-		lastbus_drv.mcu_base = of_iomap(node, 0);
-		lastbus_drv.peri_base = of_iomap(node, 1);
-	} else {
-		pr_err("can't find compatible node for lastbus\n");
+	if (lastbus_ctrl == NULL) {
+		pr_notice("kernel lastbus dump not support");
 		return -1;
 	}
 
-	ret = lastbus_start();
-	if (ret) {
-		pr_err("%s:%d: lastbus_start failed\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	/* since kernel already populates dts, our probe would be callback after this registration */
-	ret = platform_driver_register(&lastbus_drv.plt_drv);
-	if (ret) {
-		pr_err("%s:%d: platform_driver_register failed\n", __func__, __LINE__);
-		return -ENODEV;
-	}
-
-	ret = driver_create_file(&lastbus_drv.plt_drv.driver, &driver_attr_lastbus_dump);
-	if (ret)
-		pr_err("%s:%d: driver_create_file failed.\n", __func__, __LINE__);
-
-	ret = driver_create_file(&lastbus_drv.plt_drv.driver, &driver_attr_lastbus_test);
-	if (ret)
-		pr_err("%s:%d: driver_create_file failed.\n", __func__, __LINE__);
-
-	lastbus_dump_buf = kzalloc(lastbus_drv.cur_plt->min_buf_len, GFP_KERNEL);
-	if (!lastbus_dump_buf)
-		return -ENOMEM;
-
-	/* we dump here and then return lastbus_dump_buf
-		to users to prevent lastbus values cleaned by low power mechanism
-		(MCUSYS might be turned off before lastbus_dump()) */
-	lastbus_dump(lastbus_dump_buf, lastbus_drv.cur_plt->min_buf_len);
-	lastbus_enable();
+	err = platform_driver_register(&lastbus_drv);
+	if (err)
+		return err;
 
 	return 0;
 }
 
-postcore_initcall(lastbus_init);
+late_initcall_sync(lastbus_init);

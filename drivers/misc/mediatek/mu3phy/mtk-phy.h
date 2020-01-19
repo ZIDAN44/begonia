@@ -41,23 +41,23 @@
 #define U3_PHYA_DA_BASE    (PHY_BASE+0xc00)
 
 /*
-0x00000100	MODULE	ssusb_sifslv_fmreg	ssusb_sifslv_fmreg
-0x00000700	MODULE	ssusb_sifslv_ippc	ssusb_sifslv_ippc
-0x00000800	MODULE	ssusb_sifslv_u2phy_com	ssusb_sifslv_u2_phy_com_T28
-0x00000900	MODULE	ssusb_sifslv_u3phyd	ssusb_sifslv_u3phyd_T28
-0x00000a00	MODULE	ssusb_sifslv_u3phyd_bank2	ssusb_sifslv_u3phyd_bank2_T28
-0x00000b00	MODULE	ssusb_sifslv_u3phya	ssusb_sifslv_u3phya_T28
-0x00000c00	MODULE	ssusb_sifslv_u3phya_da	ssusb_sifslv_u3phya_da_T28
-*/
+ *0x00000100	MODULE	ssusb_sifslv_fmreg	ssusb_sifslv_fmreg
+ *0x00000700	MODULE	ssusb_sifslv_ippc	ssusb_sifslv_ippc
+ *0x00000800	MODULE	ssusb_sifslv_u2phy_com	ssusb_sifslv_u2_phy_com_T28
+ *0x00000900	MODULE	ssusb_sifslv_u3phyd	ssusb_sifslv_u3phyd_T28
+ *0x00000a00	MODULE	ssusb_sifslv_u3phyd_bank2	ssusb_sifslv_u3phyd_bank2_T28
+ *0x00000b00	MODULE	ssusb_sifslv_u3phya	ssusb_sifslv_u3phya_T28
+ *0x00000c00	MODULE	ssusb_sifslv_u3phya_da	ssusb_sifslv_u3phya_da_T28
+ */
 
 
 /* TYPE DEFINE */
-typedef unsigned int PHY_UINT32;
-typedef int PHY_INT32;
-typedef unsigned short PHY_UINT16;
-typedef short PHY_INT16;
-typedef unsigned char PHY_UINT8;
-typedef char PHY_INT8;
+#define PHY_UINT32 unsigned int
+#define PHY_INT32 int
+#define PHY_UINT16 unsigned short
+#define PHY_INT16 short
+#define PHY_UINT8 unsigned char
+#define PHY_INT8 char
 
 typedef PHY_UINT32 __bitwise PHY_LE32;
 
@@ -241,9 +241,31 @@ EXTERN PHY_UINT32 pwErrCnt1[CYCLE_COUNT_MAX][ERRCNT_MAX][ERRCNT_MAX];
 extern void phy_hsrx_set(void);
 
 /***********************************/
+#ifndef CONFIG_PHY_MTK_SSUSB
 extern void __iomem *ap_uart0_base;
+extern void __iomem *ap_pll_con0;
+#endif
+
 #ifdef CONFIG_FPGA_EARLY_PORTING
 extern void __iomem *i2c1_base;
+#endif
+
+#ifndef CONFIG_PHY_MTK_SSUSB
+enum {
+	USB_DPIDLE_ALLOWED = 0,
+	USB_DPIDLE_FORBIDDEN,
+	USB_DPIDLE_SRAM,
+	USB_DPIDLE_TIMER
+};
+#ifdef CONFIG_PROJECT_PHY
+extern void enable_ipsleep_wakeup(void);
+extern void disable_ipsleep_wakeup(void);
+extern void usb_hal_dpidle_request(int mode);
+#else
+static inline void usb_hal_dpidle_request(int mode) {};
+static inline void enable_ipsleep_wakeup(void) { };
+static inline void disable_ipsleep_wakeup(void) { };
+#endif
 #endif
 /***********************************/
 #endif

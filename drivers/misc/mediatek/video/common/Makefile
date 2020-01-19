@@ -24,10 +24,6 @@
 
 #####################################
 # MT67xx chipset group
-#obj-$(CONFIG_ARCH_MT6735) += IPv1/
-#obj-$(CONFIG_ARCH_MT6570) += IPv1/
-#obj-$(CONFIG_ARCH_MT6580) += IPv1/
-#obj-$(CONFIG_ARCH_MT6755) += IPv1/
 
 
 #####################################
@@ -36,55 +32,56 @@
 
 #####################################
 # Common Source files for all chips
-obj-$(CONFIG_MTK_FB) += 	mtkfb_fence.o \
-				fbconfig_kdebug.o
-
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753) $(CONFIG_ARCH_MT6580) $(CONFIG_ARCH_MT6797)))
-obj-$(CONFIG_MTK_FB) += mtkfb.o
+ifneq (y, $(filter y, $(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT6759) \
+	$(CONFIG_MACH_MT6758) $(CONFIG_MACH_MT6763) $(CONFIG_MACH_MT6739) \
+	$(CONFIG_MACH_MT6765) $(CONFIG_MACH_MT6761) $(CONFIG_MACH_MT3967) \
+	$(CONFIG_MACH_MT6779) $(CONFIG_MACH_MT6785)))
+obj-$(CONFIG_MTK_FB) += mtkfb_fence.o \
+			fbconfig_kdebug.o
 endif
 
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6570) $(CONFIG_ARCH_MT6580) $(CONFIG_ARCH_MT6755) $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753)))
-obj-$(CONFIG_MTK_FB) += disp_recorder.o
-obj-$(CONFIG_MTK_FB) += mtkfb_debug.o
-endif
+obj-y += pwm10/
 
-ifeq (y, $(filter y, $(CONFIG_ARCH_ELBRUS) $(CONFIG_ARCH_MT8167) $(CONFIG_ARCH_MT6757) $(CONFIG_ARCH_MT6797) $(CONFIG_ARCH_MT6755) $(CONFIG_ARCH_MT6752) $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753) $(CONFIG_ARCH_MT6570) $(CONFIG_ARCH_MT6580)))
-obj-y += aal20/
 obj-y += corr10/
-endif
+obj-y += color20/
 
-ifeq (y, $(filter y, $(CONFIG_ARCH_ELBRUS) $(CONFIG_ARCH_MT6757) $(CONFIG_ARCH_MT6797) $(CONFIG_ARCH_MT6753)))
+obj-y += aal30/
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6799)  $(CONFIG_MACH_MT6757) $(CONFIG_MACH_KIBOPLUS)))
 obj-y += od10/
 endif
 
 # Todo: newer chip
-ifeq (y, $(filter y, $(CONFIG_ARCH_ELBRUS) $(CONFIG_ARCH_MT8167) $(CONFIG_ARCH_MT6757) $(CONFIG_ARCH_MT6797) $(CONFIG_ARCH_MT6752) $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753) $(CONFIG_ARCH_MT6570) $(CONFIG_ARCH_MT6580) $(CONFIG_ARCH_MT6795) $(CONFIG_ARCH_MT6595)))
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6757) $(CONFIG_MACH_KIBOPLUS) $(CONFIG_MACH_MT6797) $(CONFIG_MACH_MT6795) $(CONFIG_MACH_MT8167)))
 obj-y += rdma10/
 obj-y += wdma10/
+else
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6799)))
+obj-y += rdma20/
+obj-y += wdma20/
 endif
-# Todo: newer chip
-
-
-ifeq (y, $(filter y, $(CONFIG_ARCH_ELBRUS) $(CONFIG_ARCH_MT8167) $(CONFIG_ARCH_MT6757) $(CONFIG_ARCH_MT6797) $(CONFIG_ARCH_MT6755) $(CONFIG_ARCH_MT6752) $(CONFIG_ARCH_MT6735) $(CONFIG_ARCH_MT6735M) $(CONFIG_ARCH_MT6753) $(CONFIG_ARCH_MT6570) $(CONFIG_ARCH_MT6580) $(CONFIG_ARCH_MT6795) $(CONFIG_ARCH_MT6595)))
-obj-y += color20/
 endif
+
+obj-y += layering_rule_base/
 
 ccflags-y += \
-				-I$(srctree)/drivers/misc/mediatek/video/include                  \
-				-I$(srctree)/drivers/misc/mediatek/video/common/aal20             \
-				-I$(srctree)/drivers/misc/mediatek/video/common/color20           \
-				-I$(srctree)/drivers/misc/mediatek/video/common/corr10            \
-				-I$(srctree)/drivers/misc/mediatek/video/common/IPv1              \
-				-I$(srctree)/drivers/misc/mediatek/video/common/od10              \
-				-I$(srctree)/drivers/misc/mediatek/video/common/rdma10            \
-				-I$(srctree)/drivers/misc/mediatek/video/common/wdma10            \
-				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/         \
-				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys  \
-				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox   \
-				-I$(srctree)/drivers/misc/mediatek/sync/                          \
-				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/                       \
-				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/
+				-I$(srctree)/drivers/misc/mediatek/video/include     \
+				-I$(srctree)/drivers/misc/mediatek/video/common/IPv1     \
+				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys \
+				-I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox \
+				-I$(srctree)/drivers/misc/mediatek/sync/      \
 
+
+ifeq (y, $(filter y, $(CONFIG_MACH_MT6799) $(CONFIG_MACH_MT6785) $(CONFIG_MACH_MT6759) $(CONFIG_MACH_MT6758) $(CONFIG_MACH_MT6763) $(CONFIG_MACH_MT6775) $(CONFIG_MACH_MT6771) $(CONFIG_MACH_MT6739) $(CONFIG_MACH_MT8168)))
+
+ccflags-y += \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v3/ \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v3/$(MTK_PLATFORM)/
+else
+ccflags-y += \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/ \
+				-I$(srctree)/drivers/misc/mediatek/cmdq/v2/$(MTK_PLATFORM)/
+endif
 
 ifneq ($(CONFIG_MTK_FB), y)
 obj-y += mtkfb_dummy.o
@@ -92,25 +89,9 @@ endif
 
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/mmp/
 subdir-ccflags-y += -I$(srctree)/drivers/misc/mediatek/m4u/$(MTK_PLATFORM) \
-                    -I$(srctree)/drivers/misc/mediatek/m4u/$(MTK_PLATFORM)/mt6735
+
 
 ccflags-$(CONFIG_MTK_LCM) += -I$(srctree)/drivers/misc/mediatek/lcm/inc
-
-ifeq ($(CONFIG_ARCH_MT6735),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6735/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6735/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6735/
-endif
-ifeq ($(CONFIG_ARCH_MT6735M),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6735m/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6735m/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6735m/
-endif
-ifeq ($(CONFIG_ARCH_MT6753),y)
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/dispsys/mt6753/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/videox/mt6753/
-ccflags-y += -I$(srctree)/drivers/misc/mediatek/video/$(MTK_PLATFORM)/mt6753/
-endif
 
 ccflags-y += -I$(srctree)/drivers/staging/android/ion \
              -I$(srctree)/drivers/staging/android/ion/mtk
@@ -124,8 +105,3 @@ endif
 ifeq ($(CONFIG_MTK_DITHERING_SUPPORT), y)
 ccflags-y += -DDITHERING_SUPPORT
 endif
-
-ifeq (y, $(filter y, $(CONFIG_ARCH_MT6755)))
-obj-y += layering_rule_base/v1/
-endif
-

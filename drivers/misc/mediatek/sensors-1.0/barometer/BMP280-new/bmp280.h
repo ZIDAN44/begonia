@@ -1,4 +1,16 @@
-/* BOSCH Pressure Sensor Driver
+/*****************************************************************************
+ * Copyright (C) 2016 MediaTek Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License version 2 as
+ * published by the Free Software Foundation.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See http://www.gnu.org/licenses/gpl-2.0.html for more details.
+ *
+ * Accelerometer Sensor Driver
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -9,17 +21,13 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  * GNU General Public License for more details.
  *
- */
+ *
+ *****************************************************************************/
 
 #ifndef BOSCH_BARO_H
 #define BOSCH_BARO_H
 
 #include <linux/ioctl.h>
-/*****************************************************
-*|  sensor  |   chip id  |     7-bit i2c address      |
------------------------------------------------------|
-|  bmp280  |    0x56    |0x76(SDO:Low)|0x77(SDO:High)|
-*****************************************************/
 
 /* apply low pass filter on output */
 /*#define CONFIG_BMP_LOWPASS*/

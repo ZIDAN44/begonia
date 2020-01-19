@@ -14,11 +14,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -34,10 +29,6 @@
 
 #ifndef __MUSB_LINUX_DEBUG_H__
 #define __MUSB_LINUX_DEBUG_H__
-
-#define WARNING(fmt, args...) pr_debug("%s %d: " fmt, __func__, __LINE__, ## args)
-#define INFO(fmt, args...) pr_debug("%s %d: " fmt, __func__, __LINE__, ## args)
-#define ERR(fmt, args...) pr_err("%s %d: " fmt, __func__, __LINE__, ## args)
 
 #ifdef CONFIG_DEBUG_FS
 int musb_init_debugfs(struct musb *musb);

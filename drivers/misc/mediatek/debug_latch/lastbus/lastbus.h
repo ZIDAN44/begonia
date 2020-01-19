@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2016 MediaTek Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -10,53 +10,60 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
  * GNU General Public License for more details.
  */
+#ifndef _LASTBUS_H__
+#define _LASTBUS_H__
+#include <linux/sizes.h>
+#include <linux/io.h>
 
-#ifndef __LASTPC_H__
-#define __LASTPC_H__
+#define LATCH_BUF_LENGTH SZ_4K
 
-#include <linux/platform_device.h>
-#include <linux/pm.h>
-#include <linux/compiler.h>
-
-struct lastbus_plt;
-
-struct lastbus_plt_operations {
-	/* if platform needs special settings before */
-	int (*start)(struct lastbus_plt *plt);
-	/* dump anything we get */
-	int (*dump)(struct lastbus_plt *plt, char *buf, int len);
-	/* enable the lastbus functionality */
-	int (*enable)(struct lastbus_plt *plt);
-	/* if you want to add unit test by sysfs interface, implement this */
-	int (*test)(struct lastbus_plt *plt, int test_case);
-	/* if you want to show unit test by sysfs interface, implement this */
-	int (*test_show)(char *buf);
-	/* if you want to do anything more than lastbus.c:lastbus_probe() */
-	int (*probe)(struct lastbus_plt *plt, struct platform_device *pdev);
-	/* if you want to do anything more than lastbus.c:lastbus_remove() */
-	int (*remove)(struct lastbus_plt *plt, struct platform_device *pdev);
-	/* if you want to do anything more than lastbus.c:lastbus_suspend() */
-	int (*suspend)(struct lastbus_plt *plt, struct platform_device *pdev, pm_message_t state);
-	/* if you want to do anything more than lastbus.c:lastbus_resume() */
-	int (*resume)(struct lastbus_plt *plt, struct platform_device *pdev);
+struct lastbus_perisys_offsets {
+	unsigned int bus_peri_r0;
+	unsigned int bus_peri_r1;
+	unsigned int bus_peri_mon;
 };
 
-struct lastbus_plt {
-	unsigned int min_buf_len;
-	struct lastbus_plt_operations *ops;
-	struct lastbus *common;
+struct lastbus_infrasys_offsets {
+	unsigned int bus_infra_ctrl;
+	unsigned int bus_infra_mask_l;
+	unsigned int bus_infra_mask_h;
+	unsigned int bus_infra_snapshot;
 };
 
-struct lastbus {
-	struct platform_driver plt_drv;
-	void __iomem *mcu_base;
+struct plt_cfg_bus_latch;
+
+struct lastbus_ops {
+	int (*init)(const struct plt_cfg_bus_latch *self);
+	int (*is_timeout)(const struct plt_cfg_bus_latch *self);
+	int (*dump)(const struct plt_cfg_bus_latch *self, char *buf, int *wp);
+	int (*set_event)(const struct plt_cfg_bus_latch *self,
+		const char *buf);
+	int (*get_event)(const struct plt_cfg_bus_latch *self, char *buf);
+	int (*set_timeout)(const struct plt_cfg_bus_latch *self,
+		const char *buf);
+	int (*get_timeout)(const struct plt_cfg_bus_latch *self, char *buf);
+};
+
+struct plt_cfg_bus_latch {
+	unsigned int supported;
+	unsigned int num_perisys_mon;
+	unsigned int num_infrasys_mon;
+	unsigned int num_infra_event_reg;
+	unsigned int num_peri_event_reg;
+	unsigned int secure_perisys;
+	unsigned int perisys_enable;
+	unsigned int perisys_timeout;
+	unsigned int perisys_eventmask;
+	unsigned int infrasys_enable;
+	unsigned int infrasys_config;
+	struct lastbus_ops perisys_ops;
+	struct lastbus_ops infrasys_ops;
 	void __iomem *peri_base;
-	struct lastbus_plt *cur_plt;
+	void __iomem *infra_base;
+	void __iomem *spm_flag_base;
+	struct lastbus_perisys_offsets perisys_offsets;
+	struct lastbus_infrasys_offsets infrasys_offsets;
+	int (*init)(const struct plt_cfg_bus_latch *self);
 };
-
-/* for platform register their specific lastbus behaviors
-   (chip or various versions of lastbus)
-*/
-int lastbus_register(struct lastbus_plt *plt);
-
-#endif /* end of __LASTPC_H__ */
+int lastbus_setup(struct plt_cfg_bus_latch *p);
+#endif

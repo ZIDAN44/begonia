@@ -14,11 +14,6 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  *
- * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA
- * 02110-1301 USA
- *
  * THIS SOFTWARE IS PROVIDED "AS IS" AND ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.  IN
@@ -57,8 +52,8 @@ struct musb_qh {
 	/* struct musb_qh               *next; *//* for periodic tree */
 	u8 mux;			/* qh multiplexed to hw_ep */
 
-	unsigned offset;	/* in urb->transfer_buffer */
-	unsigned segsize;	/* current xfer fragment */
+	unsigned int offset;	/* in urb->transfer_buffer */
+	unsigned int segsize;	/* current xfer fragment */
 
 	u8 type_reg;		/* {rx,tx} type register */
 	u8 intv_reg;		/* {rx,tx} interval register */
@@ -72,11 +67,12 @@ struct musb_qh {
 	u8 hb_mult;		/* high bandwidth pkts per uf */
 	u16 maxpacket;
 	u16 frame;		/* for periodic schedule */
-	unsigned iso_idx;	/* in urb->iso_frame_desc[] */
+	unsigned int iso_idx;	/* in urb->iso_frame_desc[] */
 	struct sg_mapping_iter sg_miter;	/* for highmem in PIO mode */
-#ifdef MUSB_QMU_SUPPORT_HOST
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 	u8 is_use_qmu;
 #endif
+	bool db_used;
 };
 
 /* map from control or bulk queue head to the first qh on that ring */
@@ -95,7 +91,9 @@ struct usb_hcd;
 
 extern int musb_hub_status_data(struct usb_hcd *hcd, char *buf);
 extern int musb_hub_control(struct usb_hcd *hcd,
-			    u16 typeReq, u16 wValue, u16 wIndex, char *buf, u16 wLength);
+			    u16 typeReq, u16 wValue,
+			    u16 wIndex, char *buf,
+				u16 wLength);
 
 extern const struct hc_driver musb_hc_driver;
 
@@ -112,7 +110,7 @@ static inline struct urb *next_urb(struct musb_qh *qh)
 }
 extern u16 musb_h_flush_rxfifo(struct musb_hw_ep *hw_ep, u16 csr);
 
-#ifdef MUSB_QMU_SUPPORT_HOST
+#ifdef CONFIG_MTK_MUSB_QMU_SUPPORT
 extern void musb_ep_set_qh(struct musb_hw_ep *ep, int isRx, struct musb_qh *qh);
 extern struct musb_qh *musb_ep_get_qh(struct musb_hw_ep *ep, int isRx);
 extern void musb_advance_schedule(struct musb *musb, struct urb *urb,
