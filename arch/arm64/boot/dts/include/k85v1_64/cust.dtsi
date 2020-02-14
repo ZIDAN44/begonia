@@ -561,11 +561,11 @@
 
 &md1_sim2_hot_plug_eint {
 	compatible = "mediatek,md1_sim2_hot_plug_eint-eint";
-	interrupts = <0x01 0x08>;
-	debounce = <0x01 0x186a0>;
-	dedicated = <0x01 0x00>;
-	src_pin = <0x01 0x02>;
-	sockettype = <0x01 0x00>;
+	interrupts = <1 8>;
+	debounce = <1 100000>;
+	dedicated = <1 0>;
+	src_pin = <1 2>;
+	sockettype = <1 0>;
 	status = "okay";
 };
 
