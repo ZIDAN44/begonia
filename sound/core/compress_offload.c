@@ -692,9 +692,15 @@ static int snd_compr_resume(struct snd_compr_stream *stream)
 static int snd_compr_start(struct snd_compr_stream *stream)
 {
 	int retval;
-	pr_info("snd_compr_start: stream->runtime->state = %d\n",
-		stream->runtime->state);
-	if (stream->runtime->state != SNDRV_PCM_STATE_PREPARED)
+
+	switch (stream->runtime->state) {
+	case SNDRV_PCM_STATE_SETUP:
+		if (stream->direction != SND_COMPRESS_CAPTURE)
+			return -EPERM;
+		break;
+	case SNDRV_PCM_STATE_PREPARED:
+		break;
+	default:
 		return -EPERM;
 	}
 
@@ -707,10 +713,11 @@ static int snd_compr_start(struct snd_compr_stream *stream)
 static int snd_compr_stop(struct snd_compr_stream *stream)
 {
 	int retval;
-	pr_info("snd_compr_stop: stream->runtime->state = %d\n",
-		stream->runtime->state);
-	if (stream->runtime->state == SNDRV_PCM_STATE_PREPARED ||
-			stream->runtime->state == SNDRV_PCM_STATE_SETUP)
+
+	switch (stream->runtime->state) {
+	case SNDRV_PCM_STATE_OPEN:
+	case SNDRV_PCM_STATE_SETUP:
+	case SNDRV_PCM_STATE_PREPARED:
 		return -EPERM;
 	default:
 		break;
@@ -804,10 +811,12 @@ static int snd_compress_wait_for_drain(struct snd_compr_stream *stream)
 static int snd_compr_drain(struct snd_compr_stream *stream)
 {
 	int retval;
-	pr_info("snd_compr_drain: stream->runtime->state = %d\n",
-		stream->runtime->state);
-	if (stream->runtime->state == SNDRV_PCM_STATE_PREPARED ||
-			stream->runtime->state == SNDRV_PCM_STATE_SETUP)
+	
+	switch (stream->runtime->state) {
+	case SNDRV_PCM_STATE_OPEN:
+	case SNDRV_PCM_STATE_SETUP:
+	case SNDRV_PCM_STATE_PREPARED:
+	case SNDRV_PCM_STATE_PAUSED:
 		return -EPERM;
 	case SNDRV_PCM_STATE_XRUN:
 		return -EPIPE;
@@ -854,10 +863,21 @@ static int snd_compr_next_track(struct snd_compr_stream *stream)
 static int snd_compr_partial_drain(struct snd_compr_stream *stream)
 {
 	int retval;
-	pr_info("snd_compr_partial_drain: stream->runtime->state = %d\n",
-		stream->runtime->state);
-	if (stream->runtime->state == SNDRV_PCM_STATE_PREPARED ||
-			stream->runtime->state == SNDRV_PCM_STATE_SETUP)
+
+	switch (stream->runtime->state) {
+	case SNDRV_PCM_STATE_OPEN:
+	case SNDRV_PCM_STATE_SETUP:
+	case SNDRV_PCM_STATE_PREPARED:
+	case SNDRV_PCM_STATE_PAUSED:
+		return -EPERM;
+	case SNDRV_PCM_STATE_XRUN:
+		return -EPIPE;
+	default:
+		break;
+	}
+
+	/* partial drain doesn't have any meaning for capture streams */
+	if (stream->direction == SND_COMPRESS_CAPTURE)
 		return -EPERM;
 
 	/* stream can be drained only when next track has been signalled */

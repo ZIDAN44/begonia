@@ -440,7 +440,6 @@ static bool has_ssbd_mitigation(const struct arm64_cpu_capabilities *entry,
 		WARN_ON(1);
 		break;
 	}
-
 out_printmsg:
 	switch (ssbd_state) {
 	case ARM64_SSBD_FORCE_DISABLE:
@@ -609,6 +608,16 @@ const struct arm64_cpu_capabilities arm64_errata[] = {
 		.desc = "ARM erratum 845719",
 		.capability = ARM64_WORKAROUND_845719,
 		ERRATA_MIDR_REV_RANGE(MIDR_CORTEX_A53, 0, 0, 4),
+	},
+#endif
+#ifdef CONFIG_ARM64_ERRATUM_1406411
+	{
+	/* Cortex-A76 r3p0 */
+		.desc = "ARM erratum 1406411",
+		.capability = ARM64_WORKAROUND_1406411,
+		ERRATA_MIDR_RANGE(MIDR_CORTEX_A76,
+				  3, 0,
+				  3, 0),
 	},
 #endif
 #ifdef CONFIG_CAVIUM_ERRATUM_23154

@@ -2652,7 +2652,7 @@ void cpuset_cpus_allowed_fallback(struct task_struct *tsk)
 		do_set_cpus_allowed(tsk, task_cs(tsk)->cpus_requested);
 	else
 		do_set_cpus_allowed(tsk, task_cs(tsk)->effective_cpus);
-
+		
 	rcu_read_unlock();
 
 	/*

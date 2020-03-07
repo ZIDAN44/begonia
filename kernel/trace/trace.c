@@ -3426,6 +3426,7 @@ static void print_func_help_header_irq(struct trace_buffer *buf, struct seq_file
 #ifdef CONFIG_MTK_SCHED_TRACERS
 	print_event_info(buf, m);
 #endif
+
 	seq_printf(m, "#                          %s  _-----=> irqs-off\n",
 		   tgid ? tgid_space : space);
 	seq_printf(m, "#                          %s / _----=> need-resched\n",

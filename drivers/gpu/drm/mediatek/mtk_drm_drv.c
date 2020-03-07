@@ -299,6 +299,9 @@ static int mtk_drm_kms_init(struct drm_device *drm)
 
 err_kms_helper_poll_fini:
 	drm_kms_helper_poll_fini(drm);
+err_unset_dma_parms:
+	if (private->dma_parms_allocated)
+		dma_dev->dma_parms = NULL;
 err_component_unbind:
 	component_unbind_all(drm->dev, drm);
 err_config_cleanup:
@@ -310,6 +313,8 @@ err_config_cleanup:
 static void mtk_drm_kms_deinit(struct drm_device *drm)
 {
 	mtk_fbdev_fini(drm);
+	struct mtk_drm_private *private = drm->dev_private;
+
 	drm_kms_helper_poll_fini(drm);
 	drm_atomic_helper_shutdown(drm);
 

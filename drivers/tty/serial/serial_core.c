@@ -1716,16 +1716,6 @@ static void uart_dtr_rts(struct tty_port *port, int raise)
 	uart_port_deref(uport);
 }
 
-static int uart_install(struct tty_driver *driver, struct tty_struct *tty)
-{
-	struct uart_driver *drv = driver->driver_state;
-	struct uart_state *state = drv->state + tty->index;
-
-	tty->driver_data = state;
-
-	return tty_standard_install(driver, tty);
-}
-
 /*
  * Calls to uart_open are serialised by the tty_lock in
  *   drivers/tty/tty_io.c:tty_open()
