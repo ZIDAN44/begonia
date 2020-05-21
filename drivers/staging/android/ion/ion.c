@@ -3,6 +3,7 @@
  * drivers/staging/android/ion/ion.c
  *
  * Copyright (C) 2011 Google, Inc.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -41,6 +42,7 @@
 #include "ion.h"
 #include "ion_priv.h"
 #include "compat_ion.h"
+#include <trace/events/kmem.h>
 
 #include "mtk/ion_profile.h"
 #include "mtk/mtk_ion.h"
@@ -156,6 +158,13 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 		goto err1;
 	}
 
+	spin_lock(&heap->stat_lock);
+	heap->num_of_buffers++;
+	heap->num_of_alloc_bytes += len;
+	if (heap->num_of_alloc_bytes > heap->alloc_bytes_wm)
+		heap->alloc_bytes_wm = heap->num_of_alloc_bytes;
+	spin_unlock(&heap->stat_lock);
+
 	table = buffer->sg_table;
 	buffer->dev = dev;
 	buffer->size = len;
@@ -183,16 +192,10 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	buffer->dev = dev;
 	buffer->size = len;
 	INIT_LIST_HEAD(&buffer->vmas);
+#ifdef MTK_ION_DMABUF_SUPPORT
+	INIT_LIST_HEAD(&buffer->attachments);
+#endif
 	mutex_init(&buffer->lock);
-#ifdef CONFIG_MTK_PSEUDO_M4U_V2
-	if (heap->id < ION_HEAP_TYPE_MULTIMEDIA) {
-		for_each_sg(buffer->sg_table->sgl, sg, buffer->sg_table->nents,
-			    i) {
-			sg_dma_address(sg) = sg_phys(sg);
-			sg_dma_len(sg) = sg->length;
-		}
-	}
-#else
 	if (heap->id == ION_HEAP_TYPE_MULTIMEDIA_PA2MVA)
 		goto exit;
 	/*
@@ -206,22 +209,35 @@ static struct ion_buffer *ion_buffer_create(struct ion_heap *heap,
 	 * cached mapping that mapping has been invalidated
 	 */
 	for_each_sg(buffer->sg_table->sgl, sg, buffer->sg_table->nents, i) {
+	#ifdef CONFIG_MTK_IOMMU_V2
 		if (heap->id == ION_HEAP_TYPE_MULTIMEDIA_MAP_MVA &&
-		    align < PAGE_OFFSET) {
+		    align < PAGE_OFFSET && sg_dma_len(sg) != 0) {
 			if (align < VMALLOC_START || align > VMALLOC_END) {
 				/*native va without vmalloc and no page struct*/
 				sg->length = sg_dma_len(sg);
 				continue;
 			}
 		}
+	#else
+		if (heap->id == ION_HEAP_TYPE_MULTIMEDIA_MAP_MVA) {
+		/*
+		 * We don't overwrite the sg dma information of the
+		 * buffer comes from mtk mm heap, because it will be
+		 * mapped iova by get_phys.
+		 */
+			continue;
+		}
+	#endif
 		sg_dma_address(sg) = sg_phys(sg);
 		sg_dma_len(sg) = sg->length;
 	}
 exit:
-#endif
 	mutex_lock(&dev->buffer_lock);
 	ion_buffer_add(dev, buffer);
 	mutex_unlock(&dev->buffer_lock);
+	trace_ion_heap_grow(heap->name, len,
+			    atomic_long_read(&heap->total_allocated));
+	atomic_long_add(len, &heap->total_allocated);
 	return buffer;
 
 err1:
@@ -233,10 +249,21 @@ err2:
 
 void ion_buffer_destroy(struct ion_buffer *buffer)
 {
-	if (WARN_ON(buffer->kmap_cnt > 0))
+	if (buffer->kmap_cnt > 0) {
+		WARN_ON(1);
 		buffer->heap->ops->unmap_kernel(buffer->heap, buffer);
+	}
 
+	trace_ion_heap_shrink(buffer->heap->name,  buffer->size,
+			      atomic_long_read(&buffer->heap->total_allocated));
+	atomic_long_sub(buffer->size, &buffer->heap->total_allocated);
 	buffer->heap->ops->free(buffer);
+
+	spin_lock(&buffer->heap->stat_lock);
+	buffer->heap->num_of_buffers--;
+	buffer->heap->num_of_alloc_bytes -= buffer->size;
+	spin_unlock(&buffer->heap->stat_lock);
+
 	vfree(buffer->pages);
 	kfree(buffer);
 }
@@ -460,9 +487,17 @@ struct ion_handle *ion_alloc(struct ion_client *client, size_t len,
 	struct ion_heap *heap;
 	int ret;
 	unsigned long long start, end;
+	unsigned int heap_mask = ~0;
 
 	pr_debug("%s: len %zu align %zu heap_id_mask %u flags %x\n", __func__,
 		 len, align, heap_id_mask, flags);
+
+	/* For some case(C2 audio decoder), it can not set heap id in AOSP,
+	 * so mtk ion will set this heap to ion_mm_heap.
+	 */
+	if (heap_id_mask == heap_mask)
+		heap_id_mask = ION_HEAP_MULTIMEDIA_MASK;
+
 	/*
 	 * traverse the list of heaps available in this system in priority
 	 * order.  If the heap type is supported by the client, and matches the
@@ -588,9 +623,11 @@ static void *ion_buffer_kmap_get(struct ion_buffer *buffer)
 		return buffer->vaddr;
 	}
 	vaddr = buffer->heap->ops->map_kernel(buffer->heap, buffer);
-	if (WARN_ONCE(!vaddr,
-		      "heap->ops->map_kernel should return ERR_PTR on error"))
+	if (!vaddr) {
+		WARN_ONCE(1,
+			  "heap->ops->map_kernel should return ERR_PTR on error");
 		return ERR_PTR(-EINVAL);
+	}
 	if (IS_ERR(vaddr)) {
 		IONMSG("%s map kernel is failed addr = 0x%p.\n",
 		       __func__, vaddr);
@@ -947,6 +984,204 @@ static void ion_buffer_sync_for_device(struct ion_buffer *buffer,
 				       struct device *dev,
 				       enum dma_data_direction direction);
 
+int clone_sg_table(const struct sg_table *source, struct sg_table *dest)
+{
+	int i = 0;
+	struct scatterlist *s_sg, *d_sg;
+
+	if (source->nents != dest->nents)
+		return -1;
+
+	d_sg = dest->sgl;
+	for_each_sg(source->sgl, s_sg, source->nents, i) {
+		memcpy(d_sg, s_sg, sizeof(*s_sg));
+		d_sg = sg_next(d_sg);
+	}
+
+	return 0;
+}
+
+#ifdef MTK_ION_DMABUF_SUPPORT
+static int ion_iommu_heap_type(struct ion_buffer *buffer)
+{
+	if (!buffer) {
+		WARN_ON(1);
+		return 0;
+	}
+
+	if (buffer->heap->type == (int)ION_HEAP_TYPE_FB ||
+	    buffer->heap->type == (int)ION_HEAP_TYPE_MULTIMEDIA ||
+	    buffer->heap->type == (int)ION_HEAP_TYPE_MULTIMEDIA_SEC) {
+		return 1;
+	}
+	return 0;
+}
+
+static struct sg_table *dup_sg_table(struct sg_table *table)
+{
+	struct sg_table *new_table;
+	int ret, i;
+	struct scatterlist *sg, *new_sg;
+
+	new_table = kzalloc(sizeof(*new_table), GFP_KERNEL);
+	if (!new_table)
+		return ERR_PTR(-ENOMEM);
+
+	ret = sg_alloc_table(new_table, table->nents, GFP_KERNEL);
+	if (ret) {
+		kfree(new_table);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	new_sg = new_table->sgl;
+	for_each_sg(table->sgl, sg, table->nents, i) {
+		memcpy(new_sg, sg, sizeof(*sg));
+		//sg->dma_address = 0;
+		new_sg = sg_next(new_sg);
+	}
+
+	return new_table;
+}
+
+static void free_duped_table(struct sg_table *table)
+{
+	sg_free_table(table);
+	kfree(table);
+}
+
+struct ion_dma_buf_attachment {
+	struct device *dev;
+	struct sg_table *table;
+	struct list_head list;
+};
+
+static int ion_dma_buf_attach(struct dma_buf *dmabuf, struct device *dev,
+			      struct dma_buf_attachment *attachment)
+{
+	struct ion_dma_buf_attachment *a;
+	struct sg_table *table;
+	struct ion_buffer *buffer;
+
+	if (!dmabuf->priv)
+		return -ENODEV;
+	buffer = dmabuf->priv;
+
+	if (!ion_iommu_heap_type(buffer)) {
+		IONMSG("%s not iommu device\n", __func__);
+		return 0;
+	}
+
+	a = kzalloc(sizeof(*a), GFP_KERNEL);
+	if (!a)
+		return -ENOMEM;
+
+	table = dup_sg_table(buffer->sg_table);
+	if (IS_ERR(table)) {
+		kfree(a);
+		return -ENOMEM;
+	}
+
+	a->table = table;
+	a->dev = dev;
+	INIT_LIST_HEAD(&a->list);
+
+	attachment->priv = a;
+
+	mutex_lock(&buffer->lock);
+	list_add(&a->list, &buffer->attachments);
+	mutex_unlock(&buffer->lock);
+
+    //pr_notice("%s, %d\n", __func__, __LINE__);
+	return 0;
+}
+
+static void ion_dma_buf_detatch(struct dma_buf *dmabuf,
+				struct dma_buf_attachment *attachment)
+{
+	struct ion_dma_buf_attachment *a;
+	struct ion_buffer *buffer;
+
+	if (!attachment ||
+	    !attachment->priv ||
+	    !attachment->dmabuf)
+		return;
+	a = attachment->priv;
+
+	if (!dmabuf->priv)
+		return;
+	buffer = dmabuf->priv;
+
+	if (!ion_iommu_heap_type(buffer)) {
+		IONMSG("%s not iommu device\n", __func__);
+		return;
+	}
+
+	free_duped_table(a->table);
+	mutex_lock(&buffer->lock);
+	list_del(&a->list);
+	mutex_unlock(&buffer->lock);
+
+    //pr_notice("%s, %d\n", __func__, __LINE__);
+	kfree(a);
+}
+
+static struct sg_table *ion_map_dma_buf(struct dma_buf_attachment *attachment,
+					enum dma_data_direction direction)
+{
+	struct ion_dma_buf_attachment *a;
+	struct dma_buf *dmabuf;
+	struct sg_table *table;
+	struct ion_buffer *buffer;
+	ion_phys_addr_t addr = 0x0;
+	size_t len = 0;
+	int ret = 0;
+
+	if (!attachment ||
+	    !attachment->priv ||
+	    !attachment->dmabuf)
+		return ERR_PTR(-ENODEV);
+	a = attachment->priv;
+	dmabuf = attachment->dmabuf;
+
+	if (!dmabuf->priv)
+		return ERR_PTR(-ENODEV);
+	buffer = dmabuf->priv;
+
+	if (!ion_iommu_heap_type(buffer)) {
+		pr_debug("%s not iommu device\n", __func__);
+		ion_buffer_sync_for_device(buffer,
+					   attachment->dev,
+					   direction);
+		table = buffer->sg_table;
+	} else if (buffer->heap->type ==
+		(int)ION_HEAP_TYPE_MULTIMEDIA_SEC) {
+		pr_debug("%s secure heap type\n", __func__);
+		table = a->table;
+		if (clone_sg_table(buffer->sg_table, table))
+			return ERR_PTR(-EINVAL);
+	} else {
+		pr_debug("%s iommu device, go iova mapping\n",
+			 __func__);
+		mutex_lock(&buffer->lock);
+		ret = buffer->heap->ops->phys(buffer->heap,
+					      buffer,
+					      &addr,
+					      &len);
+		mutex_unlock(&buffer->lock);
+		if (ret) {
+			IONMSG("%s, failed at get phys, ret:%d\n",
+			       __func__, ret);
+			return ERR_PTR(-ENOMEM);
+		}
+		table = a->table;
+		if (clone_sg_table(buffer->sg_table, table))
+			return ERR_PTR(-EINVAL);
+	}
+    //pr_debug("%s, %d\n", __func__, __LINE__);
+
+	return table;
+}
+#else
 static struct sg_table *ion_map_dma_buf(struct dma_buf_attachment *attachment,
 					enum dma_data_direction direction)
 {
@@ -957,10 +1192,17 @@ static struct sg_table *ion_map_dma_buf(struct dma_buf_attachment *attachment,
 	return buffer->sg_table;
 }
 
+#endif
+
 static void ion_unmap_dma_buf(struct dma_buf_attachment *attachment,
 			      struct sg_table *table,
 			      enum dma_data_direction direction)
 {
+	/*
+	 * do nothing, since the ion buffer may be shared for multiple users
+	 * the attachment will be freed at detach time
+	 * the iova will be unmapped at buffer destroy time
+	 */
 }
 
 void ion_pages_sync_for_device(struct device *dev, struct page *page,
@@ -1023,9 +1265,17 @@ static int ion_vm_fault(struct vm_fault *vmf)
 	unsigned long pfn;
 	int ret;
 
+	if (!buffer || !buffer->pages) {
+		WARN_ON(1);
+		return VM_FAULT_ERROR;
+	}
+
 	mutex_lock(&buffer->lock);
 	ion_buffer_page_dirty(buffer->pages + vmf->pgoff);
-	WARN_ON(!buffer->pages || !buffer->pages[vmf->pgoff]);
+	if (!buffer->pages[vmf->pgoff]) {
+		WARN_ON(1);
+		return VM_FAULT_ERROR;
+	}
 
 	pfn = page_to_pfn(ion_buffer_page(buffer->pages[vmf->pgoff]));
 	ret = vm_insert_pfn(vma, (unsigned long)vmf->address, pfn);
@@ -1139,6 +1389,66 @@ static void ion_dma_buf_kunmap(struct dma_buf *dmabuf, unsigned long offset,
 {
 }
 
+#ifdef MTK_ION_DMABUF_SUPPORT
+static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
+					enum dma_data_direction direction)
+{
+	struct ion_buffer *buffer = dmabuf->priv;
+	void *vaddr;
+	struct ion_dma_buf_attachment *a;
+
+	/*
+	 * TODO: Move this elsewhere because we don't always need a vaddr
+	 */
+	if (buffer->heap->ops->map_kernel) {
+		mutex_lock(&buffer->lock);
+		vaddr = ion_buffer_kmap_get(buffer);
+		mutex_unlock(&buffer->lock);
+	}
+	if (ion_iommu_heap_type(buffer)) {
+		IONMSG("%s iommu device, to cache sync\n", __func__);
+
+		mutex_lock(&buffer->lock);
+		list_for_each_entry(a, &buffer->attachments, list) {
+			dma_sync_sg_for_cpu(a->dev,
+					    a->table->sgl,
+					    a->table->nents,
+					    direction);
+		}
+		mutex_unlock(&buffer->lock);
+	}
+
+	return 0;// PTR_ERR_OR_ZERO(vaddr);
+}
+
+static int ion_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
+				      enum dma_data_direction direction)
+{
+	struct ion_buffer *buffer = dmabuf->priv;
+	struct ion_dma_buf_attachment *a;
+
+	if (buffer->heap->ops->map_kernel) {
+		mutex_lock(&buffer->lock);
+		ion_buffer_kmap_put(buffer);
+		mutex_unlock(&buffer->lock);
+	}
+
+	if (ion_iommu_heap_type(buffer)) {
+		IONMSG("%s iommu device, to cache sync\n", __func__);
+
+		mutex_lock(&buffer->lock);
+		list_for_each_entry(a, &buffer->attachments, list) {
+			dma_sync_sg_for_device(a->dev,
+					       a->table->sgl,
+					       a->table->nents,
+					       direction);
+		}
+		mutex_unlock(&buffer->lock);
+	}
+
+	return 0;
+}
+#else
 static int ion_dma_buf_begin_cpu_access(struct dma_buf *dmabuf,
 					enum dma_data_direction direction)
 {
@@ -1168,12 +1478,17 @@ static int ion_dma_buf_end_cpu_access(struct dma_buf *dmabuf,
 
 	return 0;
 }
+#endif
 
 static struct dma_buf_ops dma_buf_ops = {
 	.map_dma_buf = ion_map_dma_buf,
 	.unmap_dma_buf = ion_unmap_dma_buf,
 	.mmap = ion_mmap,
 	.release = ion_dma_buf_release,
+#ifdef MTK_ION_DMABUF_SUPPORT
+	.attach = ion_dma_buf_attach,
+	.detach = ion_dma_buf_detatch,
+#endif
 	.begin_cpu_access = ion_dma_buf_begin_cpu_access,
 	.end_cpu_access = ion_dma_buf_end_cpu_access,
 	.map_atomic = ion_dma_buf_kmap,
@@ -1338,9 +1653,8 @@ int ion_sync_for_device(struct ion_client *client, int fd)
 	buffer = dmabuf->priv;
 
 #ifdef CONFIG_MTK_ION
-#ifdef CONFIG_MTK_PSEUDO_M4U
-	if (buffer->heap->type == (int)ION_HEAP_TYPE_MULTIMEDIA ||
-	    buffer->heap->type == (int)ION_HEAP_TYPE_MULTIMEDIA_SEC)
+#ifdef CONFIG_MTK_IOMMU_V2
+	if (ion_iommu_heap_type(buffer))
 		dma_sync_sg_for_device(g_iommu_device,
 				       buffer->sg_table->sgl,
 				       buffer->sg_table->nents,
@@ -1490,14 +1804,22 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 	size_t camera_total_size = 0;
 	size_t va2mva_total_size = 0;
 	size_t total_orphaned_size = 0;
+	unsigned long long current_ts = 0;
 	unsigned int cam_id = ION_HEAP_TYPE_MULTIMEDIA_FOR_CAMERA;
 	unsigned int map_mva_id = ION_HEAP_TYPE_MULTIMEDIA_MAP_MVA;
-	seq_printf(s, "total sz[%lu]\n", 4096 * atomic64_read(&page_sz_cnt));
+
+	seq_printf(s, "total sz[%llu]\n",
+		   (unsigned long long)(4096 * atomic64_read(&page_sz_cnt)));
 	seq_printf(s, "%16.s(%16.s) %16.s %16.s %s\n",
 		   "client", "dbg_name", "pid", "size", "address");
 	seq_puts(s, "----------------------------------------------------\n");
 
 	down_read(&dev->lock);
+
+	current_ts = sched_clock();
+	do_div(current_ts, 1000000);
+	seq_printf(s, "time 1 %lld ms\n", current_ts);
+
 	for (n = rb_first(&dev->clients); n; n = rb_next(n)) {
 		struct ion_client *client = rb_entry(n, struct ion_client,
 						     node);
@@ -1526,6 +1848,11 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 	seq_puts(s, "----------------------------------------------------\n");
 	seq_puts(s, "orphaned allocation (info is from last known client):\n");
 	mutex_lock(&dev->buffer_lock);
+
+	current_ts = sched_clock();
+	do_div(current_ts, 1000000);
+	seq_printf(s, "time 2 %lld ms\n", current_ts);
+
 	for (n = rb_first(&dev->buffers); n; n = rb_next(n)) {
 		struct ion_buffer *buffer = rb_entry(n, struct ion_buffer,
 						     node);
@@ -1578,6 +1905,14 @@ static int ion_debug_heap_show(struct seq_file *s, void *unused)
 				   map_mva_heap->id,
 				   map_mva_heap->free_list_size);
 	}
+
+	seq_puts(s, "----------------------------------------------------\n");
+	seq_printf(s, "%16.s %16zu\n", "num_of_alloc_bytes ",
+		   heap->num_of_alloc_bytes);
+	seq_printf(s, "%16.s %16zu\n", "num_of_buffers ",
+		   heap->num_of_buffers);
+	seq_printf(s, "%16.s %16zu\n", "alloc_bytes_wm ",
+		   heap->alloc_bytes_wm);
 	seq_puts(s, "----------------------------------------------------\n");
 
 	if (heap->debug_show)
@@ -1636,12 +1971,15 @@ DEFINE_SIMPLE_ATTRIBUTE(debug_shrink_fops, debug_shrink_get,
 void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 {
 	struct dentry *debug_file;
+	struct dentry *heap_root;
+	char debug_name[64];
 
 	if (!heap->ops->allocate || !heap->ops->free)
 		pr_err("%s: can not add heap with invalid ops struct.\n",
 		       __func__);
 
 	spin_lock_init(&heap->free_lock);
+	spin_lock_init(&heap->stat_lock);
 	heap->free_list_size = 0;
 
 	if (heap->flags & ION_HEAP_FLAG_DEFER_FREE)
@@ -1651,6 +1989,33 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap)
 		ion_heap_init_shrinker(heap);
 
 	heap->dev = dev;
+	heap->num_of_buffers = 0;
+	heap->num_of_alloc_bytes = 0;
+	heap->alloc_bytes_wm = 0;
+
+	heap_root = debugfs_create_dir(heap->name, dev->debug_root);
+	debugfs_create_u64("num_of_buffers",
+			   0444, heap_root,
+			   &heap->num_of_buffers);
+	debugfs_create_u64("num_of_alloc_bytes",
+			   0444,
+			   heap_root,
+			   &heap->num_of_alloc_bytes);
+	debugfs_create_u64("alloc_bytes_wm",
+			   0444,
+			   heap_root,
+			   &heap->alloc_bytes_wm);
+
+	if (heap->shrinker.count_objects &&
+	    heap->shrinker.scan_objects) {
+		snprintf(debug_name, 64, "%s_shrink", heap->name);
+		debugfs_create_file(debug_name,
+				    0644,
+				    heap_root,
+				    heap,
+				    &debug_shrink_fops);
+	}
+
 	down_write(&dev->lock);
 	/*
 	 * use negative heap->id to reverse the priority -- when traversing

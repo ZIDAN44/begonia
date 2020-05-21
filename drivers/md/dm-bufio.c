@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2009-2011 Red Hat, Inc.
- * Copyright (C) 2019 XiaoMi, Inc.
  *
  * Author: Mikulas Patocka <mpatocka@redhat.com>
  *
