@@ -370,6 +370,7 @@ put_name:
 	 * to use its own hash
 	 */
 	lower_dentry = lookup_one_len_unlocked(dname.name, lower_dir_dentry, dname.len);
+
 	if (IS_ERR(lower_dentry))
 		return lower_dentry;
 

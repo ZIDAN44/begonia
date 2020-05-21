@@ -1,5 +1,6 @@
 /*
  *  Copyright (C) 2012-2013 Samsung Electronics Co., Ltd.
+ *  Copyright (C) 2020 XiaoMi, Inc.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -313,7 +314,7 @@ static int sdfat_d_hashi(const struct dentry *dentry, struct qstr *qstr)
 	return __sdfat_d_hashi(dentry, qstr);
 }
 
-
+//instead of sdfat_readdir
 static int sdfat_iterate(struct file *filp, struct dir_context *ctx)
 {
 	struct inode *inode = filp->f_path.dentry->d_inode;
@@ -356,8 +357,8 @@ get_new:
 
 	err = fsapi_readdir(inode, &de);
 	if (err) {
-
-
+		// at least we tried to read a sector
+		// move cpos to next sector position (should be aligned)
 		if (err == -EIO) {
 			cpos += 1 << (sb->s_blocksize_bits);
 			cpos &= ~((u32)sb->s_blocksize-1);
@@ -427,7 +428,7 @@ static inline void __sdfat_set_bio_iterate(struct bio *bio, sector_t sector,
 {
 	bio->bi_sector = sector;
 	bio->bi_idx = idx;
-	bio->bi_size = size;
+	bio->bi_size = size; //PAGE_SIZE;
 }
 
 static void __sdfat_truncate_pagecache(struct inode *inode,
@@ -502,8 +503,8 @@ get_new:
 
 	err = fsapi_readdir(inode, &de);
 	if (err) {
-
-
+		// at least we tried to read a sector
+		// move cpos to next sector position (should be aligned)
 		if (err == -EIO) {
 			cpos += 1 << (sb->s_blocksize_bits);
 			cpos &= ~((u32)sb->s_blocksize-1);
@@ -2294,7 +2295,7 @@ static void __sdfat_writepage_end_io(struct bio *bio, int err)
 
 #ifdef CONFIG_SDFAT_TRACE_IO
 	{
-
+		//struct sdfat_sb_info *sbi = SDFAT_SB(bio->bi_bdev->bd_super);
 		struct sdfat_sb_info *sbi = SDFAT_SB(sb);
 
 		sbi->stat_n_pages_written++;
@@ -2317,7 +2318,7 @@ static void __sdfat_writepage_end_io(struct bio *bio, int err)
 	end_page_writeback(page);
 	bio_put(bio);
 
-
+	// Update trace info.
 	atomic_dec(&SDFAT_SB(sb)->stat_n_pages_queued);
 }
 
@@ -3066,8 +3067,8 @@ static void sdfat_truncate(struct inode *inode, loff_t old_size)
 	else
 		mark_inode_dirty(inode);
 
-
-
+	// FIXME: 확인 요망
+	// inode->i_blocks = ((SDFAT_I(inode)->i_size_ondisk + (fsi->cluster_size - 1))
 	inode->i_blocks = ((i_size_read(inode) + (fsi->cluster_size - 1)) &
 			~((loff_t)fsi->cluster_size - 1)) >> inode->i_blkbits;
 out:
@@ -3278,7 +3279,7 @@ static int sdfat_da_prep_block(struct inode *inode, sector_t iblock,
 			goto unlock_ret;
 		}
 
-
+		// Reserved Cluster (only if iblock is the first sector in a clu)
 		if (sec_offset == 0) {
 			err = fsapi_reserve_clus(inode);
 			if (err) {
@@ -3292,7 +3293,7 @@ static int sdfat_da_prep_block(struct inode *inode, sector_t iblock,
 			}
 		}
 
-
+		// Delayed mapping
 		map_bh(bh_result, sb, ~((sector_t) 0xffff));
 		set_buffer_new(bh_result);
 		set_buffer_delay(bh_result);
@@ -3572,18 +3573,18 @@ static int sdfat_writepage(struct page *page, struct writeback_control *wbc)
 
 			BUG_ON(nr_blocks_towrite >= blocks_per_page);
 
-
+			// !uptodate but dirty??
 			if (buffer_dirty(bh))
 				goto confused;
 
-
+			// Nothing to writeback in this block
 			bh = bh->b_this_page;
 			block++;
 			continue;
 		}
 
 		if (nr_blocks_towrite != blocks_per_page)
-
+			// Dirty -> Non-dirty -> Dirty again case
 			goto confused;
 
 		/* Map if needed */
@@ -3641,7 +3642,7 @@ static int sdfat_writepage(struct page *page, struct writeback_control *wbc)
 		} while (bh != head);
 	}
 
-
+	// Trace # of pages queued (Approx.)
 	atomic_inc(&SDFAT_SB(sb)->stat_n_pages_queued);
 
 	sdfat_submit_fullpage_bio(head->b_bdev,
@@ -4594,7 +4595,7 @@ static int parse_options(struct super_block *sb, char *options, int silent,
 	opts->adj_hidsect = 0;
 	opts->tz_utc = 0;
 	opts->improved_allocation = 0;
-	opts->amap_opt.pack_ratio = 0;
+	opts->amap_opt.pack_ratio = 0;	// Default packing
 	opts->amap_opt.sect_per_au = 0;
 	opts->amap_opt.misaligned_sect = 0;
 	opts->symlink = 0;

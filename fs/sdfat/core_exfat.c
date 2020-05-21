@@ -1,5 +1,6 @@
 /*
  *  Copyright (C) 2012-2013 Samsung Electronics Co., Ltd.
+ *  Copyright (C) 2020 XiaoMi, Inc.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -464,7 +465,7 @@ static s32 __write_partial_entries_in_entry_set(struct super_block *sb,
 		num_entries -= copy_entries;
 
 		if (num_entries) {
-
+			// get next sector
 			if (IS_LAST_SECT_IN_CLUS(fsi, sec)) {
 				clu = SECT_TO_CLUS(fsi, sec);
 				if (es->alloc_flag == 0x03)
@@ -602,8 +603,8 @@ ENTRY_SET_CACHE_T *get_dentry_set_in_dir(struct super_block *sb,
 	pos = (DENTRY_T *) &(es->__buf);
 
 	while (num_entries) {
-
-
+		// instead of copying whole sector, we will check every entry.
+		// this will provide minimum stablity and consistency.
 		entry_type = exfat_get_entry_type(ep);
 
 		if ((entry_type == TYPE_UNUSED) || (entry_type == TYPE_DELETED))
@@ -654,7 +655,7 @@ ENTRY_SET_CACHE_T *get_dentry_set_in_dir(struct super_block *sb,
 
 		if (((off + DENTRY_SIZE) & (u32)(sb->s_blocksize - 1)) <
 					(off & (u32)(sb->s_blocksize - 1))) {
-
+			// get the next sector
 			if (IS_LAST_SECT_IN_CLUS(fsi, sec)) {
 				if (es->alloc_flag == 0x03)
 					clu++;
@@ -864,7 +865,7 @@ rewind:
 					step = DIRENT_STEP_FILE;
 				} else if (name_len == p_uniname->name_len) {
 					if (order == num_ext) {
-
+						//fid->hint_femp.eidx = -1;
 						goto found;
 					}
 					step = DIRENT_STEP_SECD;
