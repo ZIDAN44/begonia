@@ -3,7 +3,6 @@
  *  Driver for MT6360 PMIC part
  *
  *  Copyright (C) 2018 Mediatek Technology Inc.
- *  Copyright (C) 2019 XiaoMi, Inc.
  *  cy_huang <cy_huang@richtek.com>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -25,10 +24,10 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/delay.h>
-
+#if defined(CONFIG_MACH_MT6779) || defined(CONFIG_MACH_MT6785)
 #include <mach/mtk_pmic_wrap.h>
 #include <mt-plat/upmu_common.h>
-
+#endif
 #include "../inc/mt6360_pmic.h"
 #include <mt-plat/charger_class.h>
 
@@ -46,11 +45,7 @@ struct mt6360_regulator_desc {
 };
 
 static const struct mt6360_pmic_platform_data def_platform_data = {
-	.sys_ctrls = { 0x25, 0x00, 0x00 },
-	.buck1_ctrls =  { 0xa9, 0x82, 0x85, 0x6c, 0x00, 0x80, 0x02, 0x70 },
-	.buck2_ctrls =  { 0xab, 0x82, 0x85, 0x6c, 0x00, 0x80, 0x02, 0x70 },
-	.ldo6_ctrls = { 0x00, 0x80, 0x02, 0xcc, 0x44 },
-	.ldo7_ctrls = { 0x00, 0x80, 0x82, 0xcc, 0x44 },
+	.pwr_off_seq = { 0x06, 0x04, 0x00, 0x02 },
 };
 
 static const u8 sys_ctrl_mask[MT6360_SYS_CTRLS_NUM] = {
@@ -508,8 +503,10 @@ static int mt6360_pmic_set_voltage_sel(struct regulator_dev *rdev,
 	/* for LDO6/7 vocal add */
 	if (id > MT6360_PMIC_BUCK2)
 		sel = (sel >= 160) ? 0xfa : (((sel / 10) << 4) + sel % 10);
+#if defined(CONFIG_MACH_MT6779) || defined(CONFIG_MACH_MT6785)
 	if (id == MT6360_PMIC_BUCK1)
 		pwrap_write(MT6359_RG_SPI_CON12, sel);
+#endif
 	ret = mt6360_pmic_reg_update_bits(mpi, desc->vsel_reg,
 					  desc->vsel_mask, sel << shift);
 	if (ret < 0)
@@ -693,43 +690,13 @@ static const struct mt6360_pdata_prop mt6360_pdata_props[] = {
 static int mt6360_pmic_apply_pdata(struct mt6360_pmic_info *mpi,
 				   struct mt6360_pmic_platform_data *pdata)
 {
-	int i, ret;
+	int ret;
 
 	dev_dbg(mpi->dev, "%s ++\n", __func__);
 	ret = mt6360_pdata_apply_helper(mpi, pdata, mt6360_pdata_props,
 					ARRAY_SIZE(mt6360_pdata_props));
 	if (ret < 0)
 		return ret;
-	for (i = 0; i < MT6360_SYS_CTRLS_NUM; i++) {
-		ret = mt6360_pmic_reg_update_bits(mpi,
-						  MT6360_PMIC_SYSUV_CTRL1 + i,
-						  sys_ctrl_mask[i],
-						  pdata->sys_ctrls[i]);
-		if (ret < 0)
-			return ret;
-	}
-	for (i = 0; i < MT6360_BUCK_CTRLS_NUM; i++) {
-		ret = mt6360_pmic_reg_update_bits(mpi, MT6360_PMIC_BUCK1_OC + i,
-				      buck_ctrl_mask[i], pdata->buck1_ctrls[i]);
-		if (ret < 0)
-			return ret;
-		ret = mt6360_pmic_reg_update_bits(mpi, MT6360_PMIC_BUCK2_OC + i,
-				      buck_ctrl_mask[i], pdata->buck2_ctrls[i]);
-		if (ret < 0)
-			return ret;
-	}
-	for (i = 0; i < MT6360_LDO_CTRLS_NUM; i++) {
-		ret = mt6360_pmic_reg_update_bits(mpi,
-				MT6360_PMIC_LDO6_EN_CTRL1 + i, ldo_ctrl_mask[i],
-				pdata->ldo6_ctrls[i]);
-		if (ret < 0)
-			return ret;
-		ret = mt6360_pmic_reg_update_bits(mpi,
-				MT6360_PMIC_LDO7_EN_CTRL1 + i, ldo_ctrl_mask[i],
-				pdata->ldo7_ctrls[i]);
-		if (ret < 0)
-			return ret;
-	}
 	dev_dbg(mpi->dev, "%s --\n", __func__);
 	return 0;
 }
@@ -761,16 +728,8 @@ static int mt6360_pmic_parse_dt_data(struct device *dev,
 	ret = of_irq_to_resource_table(np, res, res_cnt);
 	pdata->irq_res = res;
 	pdata->irq_res_cnt = ret;
-	of_property_read_u8_array(np, "sys_ctrls",
-				  pdata->sys_ctrls, MT6360_SYS_CTRLS_NUM);
-	of_property_read_u8_array(np, "buck1_ctrls",
-				  pdata->buck1_ctrls, MT6360_BUCK_CTRLS_NUM);
-	of_property_read_u8_array(np, "buck2_ctrls",
-				  pdata->buck2_ctrls, MT6360_BUCK_CTRLS_NUM);
-	of_property_read_u8_array(np, "ldo6_ctrls",
-				  pdata->ldo6_ctrls, MT6360_LDO_CTRLS_NUM);
-	of_property_read_u8_array(np, "ldo7_ctrls",
-				  pdata->ldo7_ctrls, MT6360_LDO_CTRLS_NUM);
+	of_property_read_u8_array(np, "pwr_off_seq",
+				  pdata->pwr_off_seq, MT6360_PMIC_MAX);
 bypass_irq_res:
 	dev_dbg(dev, "%s --\n", __func__);
 	return 0;
@@ -925,12 +884,15 @@ static int mt6360_pmic_i2c_probe(struct i2c_client *client,
 	mt6360_pmic_irq_register(mpi);
 	dev_info(&client->dev, "%s: successfully probed\n", __func__);
 
+#if defined(CONFIG_MACH_MT6779) || defined(CONFIG_MACH_MT6785)
 	/* MT6359 record VMDLA vosel */
 	ret = mt6360_pmic_reg_read(mpi,
 		mt6360_pmic_descs[MT6360_PMIC_BUCK1].desc.vsel_reg);
 	if (ret < 0)
 		return ret;
 	pwrap_write(MT6359_RG_SPI_CON12, ret);
+#endif
+
 	return 0;
 out_pdata:
 	mt6360_pmic_regmap_unregister(mpi);
@@ -953,13 +915,14 @@ static int mt6360_pmic_i2c_remove(struct i2c_client *client)
 static int mt6360_pmic_enable_poweroff_sequence(struct mt6360_pmic_info *mpi,
 						bool en)
 {
+	struct mt6360_pmic_platform_data *pdata = dev_get_platdata(mpi->dev);
 	int i, ret = 0;
-	u8 off_delay[4] = { 0x06, 0x04, 0x00, 0x02 };
 
 	dev_dbg(mpi->dev, "%s: en = %d\n", __func__, en);
 	for (i = 0; i < 4; i++) {
-		ret = mt6360_pmic_reg_write(mpi, 0x07 + i,
-					    en ? off_delay[i] : 0);
+		ret = mt6360_pmic_reg_write(mpi,
+					    MT6360_PMIC_BUCK1_SEQOFFDLY + i,
+					    en ? pdata->pwr_off_seq[i] : 0);
 		if (ret < 0) {
 			dev_notice(mpi->dev, "%s: set buck(%d) fail\n",
 				__func__, i);

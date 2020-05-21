@@ -3,7 +3,6 @@
  *  Driver for MT6360 PMU part
  *
  *  Copyright (C) 2018 Mediatek Technology Inc.
- *  Copyright (C) 2019 XiaoMi, Inc.
  *  cy_huang <cy_huang@richtek.com>
  *
  *  This program is free software; you can redistribute it and/or modify

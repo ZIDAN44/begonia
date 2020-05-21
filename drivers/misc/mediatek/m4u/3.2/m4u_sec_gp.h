@@ -24,12 +24,13 @@
 #define CTX_TYPE_TDRV	1
 
 struct m4u_sec_gp_context {
-#if defined(CONFIG_TRUSTONIC_TEE_SUPPORT)
+#if defined(CONFIG_MICROTRUST_TEE_SUPPORT) || \
+	defined(CONFIG_TRUSTONIC_TEE_SUPPORT)
 /* Universally Unique Identifier of secure tl/dr */
 	struct TEEC_UUID uuid;
 #else
 /* Universally Unique Identifier of secure tl/dr */
-	struct TEEC_UUID uuid;
+	TEEC_UUID uuid;
 #endif
 	struct TEEC_Context ctx; /* basic context */
 	struct TEEC_Session session; /* session handle */

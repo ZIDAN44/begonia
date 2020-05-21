@@ -12,7 +12,6 @@
  */
 
 #include <mt-plat/upmu_common.h>
-#include <mt-plat/mtk_chip.h>
 
 #include <linux/io.h>
 #include <linux/io.h>

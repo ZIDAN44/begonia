@@ -1834,7 +1834,6 @@ extern unsigned int mt6359_upmu_set_bif_command_13(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_command_14(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_rsv(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_command_type(unsigned int val);
-extern unsigned int mt6359_upmu_set_bif_trasfer_num(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_logic_0_set(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_logic_1_set(unsigned int val);
 extern unsigned int mt6359_upmu_set_bif_stop_set(unsigned int val);

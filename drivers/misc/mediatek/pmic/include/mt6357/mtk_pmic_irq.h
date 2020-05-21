@@ -40,7 +40,8 @@ struct pmic_sp_irq {
 	unsigned short level_trig;
 	const char *name;
 	void (*callback)(void);
-	void (*oc_callback)(enum PMIC_IRQ_ENUM intNo, const char *);
+	void (*oc_callback)(enum PMIC_IRQ_ENUM intNo,
+			    const char *name);
 	unsigned int times;
 };
 
@@ -54,5 +55,7 @@ struct pmic_sp_interrupt {
 	struct pmic_sp_irq (*sp_irqs)[PMIC_INT_WIDTH];
 	unsigned int top_int_bit;
 };
+
+#define ENABLE_ALL_OC_IRQ 0
 
 #endif /*--PMIC_IRQ_H--*/

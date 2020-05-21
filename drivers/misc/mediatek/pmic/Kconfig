@@ -82,6 +82,16 @@ config MTK_PMIC_CHIP_MT6359
 	  Set y to support this driver.
 	  Set n and choose other chip.
 
+config MTK_PMIC_CHIP_MT6359P
+	tristate "MediaTek PMIC MT6359P Driver"
+	default n
+	---help---
+	  This selects for MediaTek(R) PMIC MT6359P driver.
+	  It's main chip type and providing power features like auxadc,
+	  buck/ldo, interrupt-controller..etc
+	  Set y to support this driver.
+	  Set n and choose other chip.
+
 config MTK_PMIC_CHIP_MT6335
 	tristate "MediaTek Power MT6335 Driver"
 	default n
@@ -146,6 +156,16 @@ config REGULATOR_RT5734
 
 config REGULATOR_RT5738
 	bool "Richtek Ext Buck RT5738"
+	depends on MTK_EXTBUCK
+	default n
+	---help---
+	  Richtek I2c Interface
+	  Extern Buck for MTK Platform
+	  Say Y to enable it.
+	  Say N to disable it.
+
+config REGULATOR_MT6691
+	bool "MediaTek I2C Ext Buck MT6691"
 	depends on MTK_EXTBUCK
 	default n
 	---help---

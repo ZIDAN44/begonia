@@ -1,6 +1,5 @@
 /*
  * Copyright (C) 2016 MediaTek Inc.
- * Copyright (C) 2019 XiaoMi, Inc.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -31,6 +30,7 @@
 #include <asm-generic/sections.h>
 #include <asm/page.h>
 #include <asm/irq.h>
+#include <asm/kexec.h>
 #include <mrdump.h>
 #include <mt-plat/aee.h>
 #include <linux/of.h>
@@ -42,8 +42,6 @@
 #include "mrdump_mini.h"
 #include "mrdump_private.h"
 #include <mach/memory_layout.h>
-
-static bool reserve_mem_fail;
 
 #define LOG_DEBUG(fmt, ...)			\
 	do {	\
@@ -74,12 +72,7 @@ static char modules_info_buf[MODULES_INFO_BUF_SIZE];
 
 static bool dump_all_cpus;
 
-__weak void get_android_log_buffer(unsigned long *addr, unsigned long *size,
-		unsigned long *start, int type)
-{
-}
-
-#if defined(CONFIG_TRUSTY_LOG)
+#if defined(CONFIG_GZ_LOG)
 __weak void get_gz_log_buffer(unsigned long *addr, unsigned long *paddr,
 			unsigned long *size, unsigned long *start)
 {
@@ -119,11 +112,6 @@ __weak void aee_rr_get_desc_info(unsigned long *addr, unsigned long *size,
 
 __weak void get_pidmap_aee_buffer(unsigned long *addr, unsigned long *size)
 {
-}
-
-__weak struct vm_struct *find_vm_area(const void *addr)
-{
-	return NULL;
 }
 
 #ifdef __aarch64__
@@ -570,7 +558,7 @@ EXPORT_SYMBOL(mrdump_mini_per_cpu_regs);
 
 void mrdump_mini_build_task_info(struct pt_regs *regs)
 {
-#define MAX_STACK_TRACE_DEPTH 32
+#define MAX_STACK_TRACE_DEPTH 64
 	unsigned long ipanic_stack_entries[MAX_STACK_TRACE_DEPTH];
 	char symbol[96] = {'\0'};
 	int sz;
@@ -637,7 +625,7 @@ void mrdump_mini_build_task_info(struct pt_regs *regs)
 		off = strlen(cur_proc->backtrace);
 		plen = AEE_BACKTRACE_LENGTH - ALIGN(off, 8);
 		if (plen > 16) {
-			sz = snprintf(symbol, 96, "[<%p>] %pS\n",
+			sz = snprintf(symbol, 96, "[<%px>] %pS\n",
 				      (void *)ipanic_stack_entries[i],
 				      (void *)ipanic_stack_entries[i]);
 			if (ALIGN(sz, 8) - sz) {
@@ -659,10 +647,10 @@ void mrdump_mini_build_task_info(struct pt_regs *regs)
 		cur_proc->ke_frame.pc = ipanic_stack_entries[0];
 		cur_proc->ke_frame.lr = ipanic_stack_entries[1];
 	}
-	snprintf(cur_proc->ke_frame.pc_symbol, AEE_SZ_SYMBOL_S, "[<%p>] %pS",
+	snprintf(cur_proc->ke_frame.pc_symbol, AEE_SZ_SYMBOL_S, "[<%px>] %pS",
 		 (void *)(unsigned long)cur_proc->ke_frame.pc,
 		 (void *)(unsigned long)cur_proc->ke_frame.pc);
-	snprintf(cur_proc->ke_frame.lr_symbol, AEE_SZ_SYMBOL_L, "[<%p>] %pS",
+	snprintf(cur_proc->ke_frame.lr_symbol, AEE_SZ_SYMBOL_L, "[<%px>] %pS",
 		 (void *)(unsigned long)cur_proc->ke_frame.lr,
 		 (void *)(unsigned long)cur_proc->ke_frame.lr);
 }
@@ -779,7 +767,7 @@ void mrdump_mini_ke_cpu_regs(struct pt_regs *regs)
 
 	if (!regs) {
 		regs = &context;
-		mrdump_mini_save_regs(regs);
+		crash_setup_regs(regs, NULL);
 	}
 	cpu = get_HW_cpuid();
 	mrdump_mini_cpu_regs(cpu, regs, current, 1);
@@ -790,19 +778,28 @@ void mrdump_mini_ke_cpu_regs(struct pt_regs *regs)
 }
 EXPORT_SYMBOL(mrdump_mini_ke_cpu_regs);
 
+static void mrdump_mini_fatal(const char *str)
+{
+	LOGE("minirdump: FATAL:%s\n", str);
+	BUG();
+}
+
+static unsigned int mrdump_mini_addr;
+static unsigned int mrdump_mini_size;
+void mrdump_mini_set_addr_size(unsigned int addr, unsigned int size)
+{
+	mrdump_mini_addr = addr;
+	mrdump_mini_size = size;
+}
+
 static void mrdump_mini_build_elf_misc(void)
 {
-	int i;
 	struct mrdump_mini_elf_misc misc;
-	char log_type[][16] = { "_MAIN_LOG_", "_EVENTS_LOG_", "_RADIO_LOG_",
-		"_SYSTEM_LOG_" };
 	unsigned long task_info_va =
 	    (unsigned long)((void *)mrdump_mini_ehdr + MRDUMP_MINI_HEADER_SIZE);
-	unsigned long task_info_pa =
-	    MRDUMP_MINI_BUF_PADDR ? (MRDUMP_MINI_BUF_PADDR +
-			MRDUMP_MINI_HEADER_SIZE) : __pa_nodebug(task_info_va);
-#if defined(CONFIG_TRUSTY_LOG)
-	unsigned long gz_log_pa;
+	unsigned long task_info_pa = 0;
+#if defined(CONFIG_GZ_LOG)
+	unsigned long gz_log_pa = 0;
 
 	memset_io(&misc, 0, sizeof(struct mrdump_mini_elf_misc));
 	get_gz_log_buffer(&misc.vaddr, &gz_log_pa, &misc.size, &misc.start);
@@ -810,6 +807,17 @@ static void mrdump_mini_build_elf_misc(void)
 		mrdump_mini_add_misc_pa(misc.vaddr, gz_log_pa, misc.size,
 					misc.start, "_GZ_LOG_");
 #endif
+	if (mrdump_mini_addr != 0
+		&& mrdump_mini_size != 0
+		&& MRDUMP_MINI_HEADER_SIZE < mrdump_mini_size) {
+		task_info_pa = (unsigned long)(mrdump_mini_addr +
+				MRDUMP_MINI_HEADER_SIZE);
+	} else {
+		LOGE("minirdump: unexpected addr:0x%x, size:0x%x(0x%x)\n",
+			mrdump_mini_addr, mrdump_mini_size,
+			(unsigned int)MRDUMP_MINI_HEADER_SIZE);
+		mrdump_mini_fatal("illegal addr size");
+	}
 	mrdump_mini_add_misc_pa(task_info_va, task_info_pa,
 			sizeof(struct aee_process_info), 0, "PROC_CUR_TSK");
 	memset_io(&misc, 0, sizeof(struct mrdump_mini_elf_misc));
@@ -835,13 +843,6 @@ static void mrdump_mini_build_elf_misc(void)
 		(unsigned long)__pa_nodebug((unsigned long)modules_info_buf),
 		MODULES_INFO_BUF_SIZE, 0, "SYS_MODULES_INFO");
 #endif
-	for (i = 0; i < 4; i++) {
-		memset_io(&misc, 0, sizeof(struct mrdump_mini_elf_misc));
-		get_android_log_buffer(&misc.vaddr, &misc.size, &misc.start,
-				i + 1);
-		mrdump_mini_add_misc(misc.vaddr, misc.size, misc.start,
-				log_type[i]);
-	}
 
 	memset_io(&misc, 0, sizeof(struct mrdump_mini_elf_misc));
 	get_pidmap_aee_buffer(&misc.vaddr, &misc.size);
@@ -924,7 +925,7 @@ static void mrdump_mini_clear_loads(void)
 	}
 }
 
-static void __init *remap_lowmem(phys_addr_t start, phys_addr_t size)
+static void *remap_lowmem(phys_addr_t start, phys_addr_t size)
 {
 	struct page **pages;
 	phys_addr_t page_start;
@@ -964,19 +965,26 @@ static void __init *remap_lowmem(phys_addr_t start, phys_addr_t size)
 #define PSTORE_SIZE 0x8000
 static void __init mrdump_mini_elf_header_init(void)
 {
-	if (MRDUMP_MINI_BUF_PADDR)
+	if (mrdump_mini_addr != 0
+		&& mrdump_mini_size != 0) {
 		mrdump_mini_ehdr =
-		    remap_lowmem(MRDUMP_MINI_BUF_PADDR,
-				 MRDUMP_MINI_HEADER_SIZE + TASK_INFO_SIZE +
-				 PSTORE_SIZE);
-	else
-		mrdump_mini_ehdr = kmalloc(MRDUMP_MINI_HEADER_SIZE, GFP_KERNEL);
+		    remap_lowmem(mrdump_mini_addr,
+				 mrdump_mini_size);
+		LOGE("minirdump: [DT] reserved 0x%x+0x%lx->%p\n",
+			mrdump_mini_addr,
+			(unsigned long)mrdump_mini_size,
+			mrdump_mini_ehdr);
+	} else {
+		LOGE("minirdump: [DT] illegal value 0x%x(0x%x)\n",
+				mrdump_mini_addr,
+				mrdump_mini_size);
+		mrdump_mini_fatal("illegal addr size");
+	}
 	if (mrdump_mini_ehdr == NULL) {
 		LOGE("mrdump mini reserve buffer fail");
+		mrdump_mini_fatal("header null pointer");
 		return;
 	}
-	LOGE("mirdump: reserved %x+%lx->%p", MRDUMP_MINI_BUF_PADDR,
-	     (unsigned long)MRDUMP_MINI_HEADER_SIZE, mrdump_mini_ehdr);
 	memset_io(mrdump_mini_ehdr, 0, MRDUMP_MINI_HEADER_SIZE +
 			sizeof(struct aee_process_info));
 	fill_elf_header(&mrdump_mini_ehdr->ehdr, MRDUMP_MINI_NR_SECTION);
@@ -987,11 +995,6 @@ int mrdump_mini_init(void)
 	int i;
 	unsigned long size, offset;
 	struct pt_regs regs;
-
-	if (reserve_mem_fail) {
-		pr_info("minirdump wrong reserved memory\n");
-		BUG();
-	}
 
 	mrdump_mini_elf_header_init();
 
@@ -1042,22 +1045,8 @@ int mrdump_mini_init(void)
 	return 0;
 }
 
-void mrdump_mini_reserve_memory(void)
-{
-	if (MRDUMP_MINI_BUF_PADDR)
-		memblock_reserve(MRDUMP_MINI_BUF_PADDR,
-			MRDUMP_MINI_HEADER_SIZE + TASK_INFO_SIZE + PSTORE_SIZE);
-}
-
 int mini_rdump_reserve_memory(struct reserved_mem *rmem)
 {
-#ifndef DUMMY_MEMORY_LAYOUT
-	if (rmem->base != KERN_MINIDUMP_BASE ||
-		rmem->size > KERN_MINIDUMP_MAX_SIZE) {
-		reserve_mem_fail = true;
-		pr_info("minirdump: Check the reserved address and size\n");
-	}
-#endif
 	pr_info("[memblock]%s: 0x%llx - 0x%llx (0x%llx)\n",
 		"mediatek,minirdump",
 		 (unsigned long long)rmem->base,

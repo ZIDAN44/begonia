@@ -90,8 +90,6 @@ bool mtk_loading_base_dvfs_step(int i32MarginValue);
 bool mtk_get_loading_base_dvfs_step(int *pi32MarginValue);
 bool mtk_timer_base_dvfs_margin(int i32MarginValue);
 bool mtk_get_timer_base_dvfs_margin(int *pi32MaginValue);
-bool mtk_dvfs_cwaitg(unsigned int ui32DvfsCWaitG);
-bool mtk_get_dvfs_cwaitg(unsigned int *pui32DvfsCWaitG);
 
 /* MET */
 bool mtk_enable_gpu_perf_monitor(bool enable);

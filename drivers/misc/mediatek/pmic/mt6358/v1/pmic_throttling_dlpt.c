@@ -767,7 +767,7 @@ static DEFINE_MUTEX(dlpt_notify_mutex);
 #define DLPT_NUM 16
 
 struct dlpt_callback_table {
-	void (*dlpt_cb)(unsigned int);
+	void (*dlpt_cb)(unsigned int dlpt_val);
 };
 
 struct dlpt_callback_table dlpt_cb_tb[] = {
@@ -776,7 +776,7 @@ struct dlpt_callback_table dlpt_cb_tb[] = {
 };
 
 void register_dlpt_notify(
-	void (*dlpt_callback)(unsigned int),
+	void (*dlpt_callback)(unsigned int dlpt_val),
 	enum DLPT_PRIO_TAG prio_val)
 {
 	PMICLOG("[%s] start\n", __func__);
@@ -1792,7 +1792,7 @@ int pmic_throttling_dlpt_init(struct platform_device *pdev)
 	u32 val;
 	char *path;
 
-	path = "/bat_gm30";
+	path = "/battery";
 	np = of_find_node_by_path(path);
 	if (of_property_read_u32(np, "CAR_TUNE_VALUE", &val) == 0) {
 		fg_cust_data.car_tune_value = (int)val*10;

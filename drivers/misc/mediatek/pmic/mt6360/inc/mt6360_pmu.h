@@ -2,7 +2,6 @@
  *  drivers/misc/mediatek/pmic/mt6360/inc/mt6360_pmu.h
  *
  *  Copyright (C) 2018 Mediatek Technology Corp.
- *  Copyright (C) 2019 XiaoMi, Inc.
  *  cy_huang <cy_huang@richtek.com>
  *
  *  This program is free software; you can redistribute it and/or modify

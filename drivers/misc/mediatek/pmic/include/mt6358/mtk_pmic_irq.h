@@ -38,7 +38,7 @@ struct pmic_sp_irq {
 	unsigned short used;
 	const char *name;
 	void (*callback)(void);
-	void (*oc_callback)(enum PMIC_IRQ_ENUM intNo, const char *);
+	void (*oc_callback)(enum PMIC_IRQ_ENUM intNo, const char *int_name);
 	unsigned int times;
 };
 
