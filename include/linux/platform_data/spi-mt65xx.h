@@ -2,7 +2,6 @@
  *  MTK SPI bus driver definitions
  *
  * Copyright (c) 2015 MediaTek Inc.
- * Copyright (C) 2019 XiaoMi, Inc.
  * Author: Leilk Liu <leilk.liu@mediatek.com>
  *
  * This program is free software; you can redistribute it and/or modify

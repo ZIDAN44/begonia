@@ -42,7 +42,6 @@ struct tipc_chan_ops {
 
 struct tipc_dn_chan {
 	int state;
-	int state_bak;
 	struct mutex lock; /* protects rx_msg_queue list and channel state */
 	struct tipc_chan *chan;
 	wait_queue_head_t readq;

@@ -221,6 +221,10 @@ extern void scheduler_tick(void);
 
 #define	MAX_SCHEDULE_TIMEOUT		LONG_MAX
 
+#ifdef CONFIG_DEBUG_PREEMPT
+#define PREEMPT_DISABLE_DEEPTH 5
+#endif
+
 extern long schedule_timeout(long timeout);
 extern long schedule_timeout_interruptible(long timeout);
 extern long schedule_timeout_killable(long timeout);
@@ -873,6 +877,10 @@ struct task_struct {
 	unsigned			sched_contributes_to_load:1;
 	unsigned			sched_migrated:1;
 	unsigned			sched_remote_wakeup:1;
+#ifdef CONFIG_PSI
+	unsigned			sched_psi_wake_requeue:1;
+#endif
+
 	/* Force alignment to the next boundary: */
 	unsigned			:0;
 
@@ -1144,6 +1152,10 @@ struct task_struct {
 	siginfo_t			*last_siginfo;
 
 	struct task_io_accounting	ioac;
+#ifdef CONFIG_PSI
+	/* Pressure stall state */
+	unsigned int			psi_flags;
+#endif
 #ifdef CONFIG_TASK_XACCT
 	/* Accumulated RSS usage: */
 	u64				acct_rss_mem1;
@@ -1185,6 +1197,7 @@ struct task_struct {
 #endif
 #ifdef CONFIG_DEBUG_PREEMPT
 	unsigned long			preempt_disable_ip;
+	unsigned long preempt_disable_ips[PREEMPT_DISABLE_DEEPTH];
 #endif
 #ifdef CONFIG_NUMA
 	/* Protected by alloc_lock: */
@@ -1358,10 +1371,6 @@ struct task_struct {
 
 #ifdef CONFIG_PREEMPT_MONITOR
 	unsigned long preempt_dur;
-#endif
-#ifdef CONFIG_MTK_CACHE_CONTROL
-	u64 stall_ratio;
-	u64 badness;
 #endif
 	/*
 	 * New fields for task_struct should be added above here, so that
@@ -1580,6 +1589,7 @@ extern struct pid *cad_pid;
 #define PF_KTHREAD		0x00200000	/* I am a kernel thread */
 #define PF_RANDOMIZE		0x00400000	/* Randomize virtual address space */
 #define PF_SWAPWRITE		0x00800000	/* Allowed to write to swap */
+#define PF_MEMSTALL		0x01000000	/* Stalled due to lack of memory */
 #define PF_NO_SETAFFINITY	0x04000000	/* Userland is not allowed to meddle with cpus_allowed */
 #define PF_MCE_EARLY		0x08000000      /* Early kill for mce process policy */
 #define PF_MUTEX_TESTER		0x20000000	/* Thread belongs to the rt mutex tester */
@@ -1954,4 +1964,8 @@ extern long sched_getaffinity(pid_t pid, struct cpumask *mask);
 #endif
 
 #include <linux/sched/sched.h>
+#endif
+
+#ifdef CONFIG_SCHED_TUNE
+extern int set_stune_task_threshold(int threshold);
 #endif

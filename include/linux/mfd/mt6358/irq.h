@@ -14,23 +14,6 @@
 #ifndef __MFD_MT6358_IRQ_H__
 #define __MFD_MT6358_IRQ_H__
 
-
-struct sp_top_t {
-	int hwirq_base;
-	unsigned int num_int_regs;
-	unsigned int en_reg;
-	unsigned int mask_reg;
-	unsigned int sta_reg;
-	unsigned int raw_sta_reg;
-	unsigned int top_offset;
-};
-
-struct pmic_irq_t {
-	const char *name;
-	int hwirq;
-	struct sp_top_t *sp_top;
-};
-
 #define SP_TOP_GEN(sp)	\
 	{	\
 		.hwirq_base = -1,	\
