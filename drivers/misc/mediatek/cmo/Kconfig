@@ -1,5 +1,5 @@
 config MTK_ION_CACHE_OPTIMIZATION
-	bool "MTK ION CACHE OPTIMIZATION"
+	bool "MTK FPGA EARLY PORTING"
 	default n
 	help
 	  This option is used for optimize ion cache

@@ -96,7 +96,11 @@ root_schedtune = {
  *    implementation especially for the computation of the per-CPU boost
  *    value
  */
+#ifdef CONFIG_MTK_IO_BOOST
+#define BOOSTGROUPS_COUNT 6
+#else
 #define BOOSTGROUPS_COUNT 5
+#endif
 
 /* Array of configured boostgroups */
 static struct schedtune *allocated_group[BOOSTGROUPS_COUNT] = {
@@ -707,7 +711,7 @@ prefer_idle_write(struct cgroup_subsys_state *css, struct cftype *cft,
 	    u64 prefer_idle)
 {
 	struct schedtune *st = css_st(css);
-	st->prefer_idle = prefer_idle;
+	st->prefer_idle = !!prefer_idle;
 
 #if MET_STUNE_DEBUG
 	/* user: foreground */

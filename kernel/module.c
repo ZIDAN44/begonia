@@ -3740,7 +3740,10 @@ static int load_module(struct load_info *info, const char __user *uargs,
 	flush_module_icache(mod);
 
 	/* Now copy in args */
-	mod->args = strndup_user(uargs, ~0UL >> 1);
+	if (uargs)
+		mod->args = strndup_user(uargs, ~0UL >> 1);
+	else
+		mod->args = kstrdup("", GFP_KERNEL);
 	if (IS_ERR(mod->args)) {
 		err = PTR_ERR(mod->args);
 		goto free_arch_cleanup;
@@ -3863,6 +3866,30 @@ SYSCALL_DEFINE3(init_module, void __user *, umod,
 
 	return load_module(&info, uargs, 0);
 }
+
+#ifdef CONFIG_MNTL_SUPPORT
+int init_module_mem(void *buf, int size)
+{
+	int err;
+	struct load_info info = { };
+
+	err = may_init_module();
+	if (err) {
+		pr_debug("may_init_module: err=%d\n", err);
+		return err;
+	}
+	pr_debug("%s: buf=%p, len=%d\n", __func__, buf, size);
+	err = security_kernel_read_file(NULL, READING_MODULE);
+	if (err)
+		return err;
+
+	info.hdr = buf;
+	info.len = size;
+
+	return load_module(&info, NULL, 0);
+}
+EXPORT_SYMBOL(init_module_mem);
+#endif
 
 SYSCALL_DEFINE3(finit_module, int, fd, const char __user *, uargs, int, flags)
 {
@@ -4377,17 +4404,14 @@ void print_modules(void)
 	list_for_each_entry_rcu(mod, &modules, list) {
 		if (mod->state == MODULE_STATE_UNFORMED)
 			continue;
-#if 0
-		pr_cont(" %s%s", mod->name, module_flags(mod, buf));
-#else
-		pr_cont(" %s %p %p %d %d %s",
+
+		pr_cont(" %s %px %px %d %d %s",
 			mod->name,
 			mod->core_layout.base,
 			mod->init_layout.base,
 			mod->core_layout.size,
 			mod->init_layout.size,
 			module_flags(mod, buf));
-#endif
 	}
 	preempt_enable();
 	if (last_unloaded_module[0])
@@ -4418,7 +4442,7 @@ int save_modules(char *mbuf, int mbufsize)
 				mbufsize);
 			break;
 		}
-		sz += snprintf(mbuf + sz, mbufsize - sz, " %s %p %p %d %d %s",
+		sz += snprintf(mbuf + sz, mbufsize - sz, " %s %px %px %d %d %s",
 				mod->name,
 				mod->core_layout.base,
 				mod->init_layout.base,

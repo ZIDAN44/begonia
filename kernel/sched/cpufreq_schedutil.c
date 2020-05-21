@@ -23,7 +23,7 @@
 #include "cpufreq_schedutil.h"
 
 static struct cpufreq_governor schedutil_gov;
-unsigned long boosted_cpu_util(int cpu, unsigned long other_util);
+unsigned long boosted_cpu_util(int cpu);
 
 void (*cpufreq_notifier_fp)(int cluster_id, unsigned long freq);
 EXPORT_SYMBOL(cpufreq_notifier_fp);
@@ -161,9 +161,7 @@ static void sugov_update_commit(struct sugov_policy *sg_policy, u64 time,
 				unsigned int next_freq)
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
-#ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
 	int cid = arch_get_cluster_id(policy->cpu);
-#endif
 
 	if (sg_policy->next_freq == next_freq)
 		return;
@@ -196,6 +194,10 @@ static void sugov_update_commit(struct sugov_policy *sg_policy, u64 time,
 #endif
 }
 
+#ifdef CONFIG_NONLINEAR_FREQ_CTL
+
+#include "cpufreq_schedutil_plus.c"
+#else
 /**
  * get_next_freq - Compute a new frequency for a given cpufreq policy.
  * @sg_policy: schedutil policy object to compute the new frequency for.
@@ -234,16 +236,18 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 	return cpufreq_driver_resolve_freq(policy, freq);
 #endif
 }
+#endif
 
 static void sugov_get_util(unsigned long *util, unsigned long *max, int cpu)
 {
-	unsigned long max_cap, rt;
+	unsigned long max_cap;
 
 	max_cap = arch_scale_cpu_capacity(NULL, cpu);
 
-	rt = sched_get_rt_rq_util(cpu);
+	*util = boosted_cpu_util(cpu);
+	if (idle_cpu(cpu))
+		*util = 0;
 
-	*util = boosted_cpu_util(cpu, rt);
 	*util = min(*util, max_cap);
 	*max = max_cap;
 }
@@ -397,7 +401,8 @@ static unsigned int sugov_next_freq_shared(struct sugov_cpu *sg_cpu, u64 time)
 		if (delta_ns > TICK_NSEC) {
 			j_sg_cpu->iowait_boost = 0;
 			j_sg_cpu->iowait_boost_pending = false;
-			continue;
+			if (idle_cpu(j))
+				continue;
 		}
 		if (j_sg_cpu->flags & SCHED_CPUFREQ_DL)
 			return policy->cpuinfo.max_freq;

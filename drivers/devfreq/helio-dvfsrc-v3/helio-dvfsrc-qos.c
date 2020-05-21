@@ -34,13 +34,26 @@
 #include <helio-dvfsrc-qos.h>
 
 #ifdef CONFIG_MTK_TINYSYS_SSPM_SUPPORT
-#include <sspm_ipi.h>
+#include <v1/sspm_ipi.h>
 #include <sspm_ipi_pin.h>
 #endif
 
 struct helio_dvfsrc *dvfsrc;
 
 #define DVFSRC_REG(offset) (dvfsrc->regs + offset)
+
+#if defined(CONFIG_MACH_MT6885)
+#define SPM_REG(offset) (dvfsrc->spm_regs + offset)
+
+u32 spm_reg_read(u32 offset)
+{
+	if (is_dvfsrc_enabled())
+		return readl(SPM_REG(offset));
+	else
+		return 0;
+}
+#endif
+
 
 u32 dvfsrc_read(u32 offset)
 {

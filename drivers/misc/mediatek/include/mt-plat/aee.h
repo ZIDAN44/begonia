@@ -110,12 +110,28 @@ struct aee_user_thread_maps {
 	unsigned char *Userthread_maps;
 };
 
+struct unwind_info_stack {
+	pid_t tid __packed __aligned(8);
+#ifdef __aarch64__
+	__u64 sp;
+#else
+	long sp __packed __aligned(8);
+#endif
+	int StackLength __packed __aligned(8);
+	unsigned char *Userthread_Stack __packed __aligned(8);
+};
+
+struct unwind_info_rms {
+	pid_t tid __packed __aligned(8);
+	struct pt_regs *regs __packed __aligned(8);
+	int StackLength __packed __aligned(8);
+	unsigned char *Userthread_Stack __packed __aligned(8);
+	int Userthread_mapsLength __packed __aligned(8);
+	unsigned char *Userthread_maps __packed __aligned(8);
+};
+
 #ifdef CONFIG_MTK_PRINTK_UART_CONSOLE
 extern int printk_disable_uart;
-#endif
-
-#ifdef CONFIG_CONSOLE_LOCK_DURATION_DETECT
-extern char *mtk8250_uart_dump(void);
 #endif
 
 #ifdef CONFIG_MTK_RAM_CONSOLE
@@ -185,9 +201,7 @@ struct aee_kernel_api {
 
 void aee_sram_printk(const char *fmt, ...);
 int aee_nested_printf(const char *fmt, ...);
-void aee_wdt_irq_info(void);
 void aee_wdt_fiq_info(void *arg, void *regs, void *svc_sp);
-void aee_trigger_kdb(void);
 struct aee_oops *aee_oops_create(enum AE_DEFECT_ATTR attr,
 		enum AE_EXP_CLASS clazz, const char *module);
 void aee_oops_set_backtrace(struct aee_oops *oops, const char *backtrace);
@@ -294,10 +308,22 @@ void aed_common_exception_api(const char *assert_type, const int *log, int
 			log_size, const int *phy, int phy_size, const char
 			*detail, const int db_opt);
 
-void aee_kernel_wdt_kick_Powkey_api(const char *module, int msg);
-int aee_kernel_wdt_kick_api(int kinterval);
-void aee_powerkey_notify_press(unsigned long pressed);
-int aee_kernel_Powerkey_is_press(void);
+static inline void  aee_kernel_wdt_kick_Powkey_api(const char *module, int msg)
+{
+
+}
+static inline int aee_kernel_wdt_kick_api(int kinterval)
+{
+	return 0;
+}
+static inline void aee_powerkey_notify_press(unsigned long pressed)
+{
+
+}
+static inline int aee_kernel_Powerkey_is_press(void)
+{
+	return 0;
+}
 
 void ipanic_recursive_ke(struct pt_regs *regs, struct pt_regs *excp_regs,
 			int cpu);

@@ -14,9 +14,7 @@
 #ifndef MTK_RTC_H
 #define MTK_RTC_H
 
-#include <linux/ioctl.h>
 #include <linux/rtc.h>
-#include <linux/types.h>
 
 enum rtc_gpio_user_t {
 	RTC_GPIO_USER_WIFI = 8,
@@ -30,8 +28,8 @@ enum rtc_gpio_user_t {
 
 /*
  * NOTE:
- * 1. RTC_GPIO always exports 32K enabled by some user
- * even if the phone is powered off
+ * 1. RTC_GPIO always exports 32K enabled
+ * by some user even if the phone is powered off
  */
 
 extern unsigned long rtc_read_hw_time(void);
@@ -76,24 +74,15 @@ extern bool crystal_exist_status(void);
 #define rtc_read_hw_time()              ({ 0; })
 #define rtc_gpio_enable_32k(user)	({ 0; })
 #define rtc_gpio_disable_32k(user)	({ 0; })
-#define rtc_gpio_32k_status()		({ 0; })
-#define rtc_enable_abb_32k()		({ 0; })
-#define rtc_disable_abb_32k()		({ 0; })
-#define rtc_enable_writeif()		({ 0; })
-#define rtc_disable_writeif()		({ 0; })
 #define rtc_mark_recovery()             ({ 0; })
 #define rtc_mark_kpoc()                 ({ 0; })
 #define rtc_mark_fast()		        ({ 0; })
-#define rtc_rdwr_uart_bits(val)		({ 0; })
-#define rtc_bbpu_power_down()		({ 0; })
 #define rtc_read_pwron_alarm(alm)	({ 0; })
 #define get_rtc_spare_fg_value()	({ 0; })
 #define set_rtc_spare_fg_value(val)	({ 0; })
-#define get_rtc_spare0_fg_value()	({ 0; })
+#define get_rtc_spare0_fg_value()		({ 0; })
 #define set_rtc_spare0_fg_value(val)	({ 0; })
-#define rtc_irq_handler()			({ 0; })
 #define crystal_exist_status()		({ 0; })
-/* __weak void mt_power_off(void); */
 #endif/*ifdef CONFIG_MTK_RTC*/
 void __attribute__((weak)) rtc_clock_enable(int enable)
 {

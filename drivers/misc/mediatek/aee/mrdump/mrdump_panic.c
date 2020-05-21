@@ -19,24 +19,19 @@
 #include <asm/stacktrace.h>
 #include <asm/traps.h>
 #include <asm/system_misc.h>
+#include <asm/kexec.h>
 #include <linux/kdebug.h>
 #include <linux/module.h>
 #include <linux/delay.h>
 #include <linux/sched/clock.h>
 #include <mrdump.h>
 #include <linux/reboot.h>
-#include "mrdump_panic.h"
 #ifdef CONFIG_MTK_WATCHDOG
 #include <mtk_wd_api.h>
 #endif
 #include "mrdump_private.h"
 #include "mrdump_mini.h"
-
-int __weak ipanic_atflog_buffer(void *data, unsigned char *buffer,
-		size_t sz_buf)
-{
-	return 0;
-}
+#include <mt-plat/mtk_ram_console.h>
 
 void __weak sysrq_sched_debug_show_at_AEE(void)
 {
@@ -137,7 +132,7 @@ void ipanic_recursive_ke(struct pt_regs *regs, struct pt_regs *excp_regs,
 				regs, "Kernel NestedPanic");
 	} else {
 		aee_nested_printf("both NULL\n");
-		mrdump_mini_save_regs(&saved_regs);
+		crash_setup_regs(&saved_regs, NULL);
 		__mrdump_create_oops_dump(AEE_REBOOT_MODE_NESTED_EXCEPTION,
 				&saved_regs, "Kernel NestedPanic");
 	}
@@ -204,7 +199,7 @@ int ipanic(struct notifier_block *this, unsigned long event, void *ptr)
 #ifdef CONFIG_MTK_RAM_CONSOLE
 	fiq_step = AEE_FIQ_STEP_KE_IPANIC_START;
 #endif
-	mrdump_mini_save_regs(&saved_regs);
+	crash_setup_regs(&saved_regs, NULL);
 	return mrdump_common_die(fiq_step,
 				 AEE_REBOOT_MODE_KERNEL_PANIC,
 				 "Kernel Panic", &saved_regs);
@@ -298,7 +293,7 @@ inline void aee_print_regs(struct pt_regs *regs)
 	aee_nested_printf("\n");
 }
 
-#define AEE_MAX_EXCP_FRAME	32
+#define AEE_MAX_EXCP_FRAME	64
 inline void aee_print_bt(struct pt_regs *regs)
 {
 	int i;
@@ -308,7 +303,7 @@ inline void aee_print_bt(struct pt_regs *regs)
 
 	bottom = regs->reg_sp;
 	if (!mrdump_virt_addr_valid(bottom)) {
-		aee_nested_printf("invalid sp[%lx]\n", regs);
+		aee_nested_printf("invalid sp[%lx]\n", (unsigned long)regs);
 		return;
 	}
 	high = ALIGN(bottom, THREAD_SIZE);
@@ -317,9 +312,9 @@ inline void aee_print_bt(struct pt_regs *regs)
 #ifndef __aarch64__
 	cur_frame.sp = regs->reg_sp;
 #endif
-	aee_nested_printf("\n[<%p>] %pS\n", (void *)cur_frame.pc,
+	aee_nested_printf("\n[<%px>] %pS\n", (void *)cur_frame.pc,
 			(void *)cur_frame.pc);
-	aee_nested_printf("[<%p>] %pS\n", (void *)regs->reg_lr,
+	aee_nested_printf("[<%px>] %pS\n", (void *)regs->reg_lr,
 			(void *)regs->reg_lr);
 	for (i = 0; i < AEE_MAX_EXCP_FRAME; i++) {
 		fp = cur_frame.fp;
@@ -335,7 +330,7 @@ inline void aee_print_bt(struct pt_regs *regs)
 #endif
 		if (ret < 0 || !mrdump_virt_addr_valid(cur_frame.pc))
 			break;
-		aee_nested_printf("[<%p>] %pS\n", (void *)cur_frame.pc,
+		aee_nested_printf("[<%px>] %pS\n", (void *)cur_frame.pc,
 				(void *)cur_frame.pc);
 
 	}
@@ -348,7 +343,8 @@ inline int aee_nested_save_stack(struct pt_regs *regs)
 
 	if (!mrdump_virt_addr_valid(regs->reg_sp))
 		return -1;
-	aee_nested_printf("[%lx %lx]\n", regs->reg_sp, regs->reg_sp + 256);
+	aee_nested_printf("[%lx %lx]\n", (unsigned long)regs->reg_sp,
+			(unsigned long)regs->reg_sp + 256);
 
 	len = aee_dump_stack_top_binary(nested_panic_buf,
 		sizeof(nested_panic_buf), regs->reg_sp, regs->reg_sp + 256);
@@ -430,7 +426,7 @@ asmlinkage void aee_stop_nested_panic(struct pt_regs *regs)
 	/*nested panic may happens more than once on many/single cpus */
 	if (atomic_read(&nested_panic_time) < 3)
 		aee_nested_printf("\nCPU%dpanic%d@%d-%s\n", cpu,
-				nested_panic_time, prev_fiq_step,
+				nested_panic_time.counter, prev_fiq_step,
 				get_timestamp_string(tsbuf, TS_MAX_LEN));
 	atomic_inc(&nested_panic_time);
 
@@ -454,7 +450,8 @@ asmlinkage void aee_stop_nested_panic(struct pt_regs *regs)
 			 */
 			aee_nested_printf(
 				"invalid thread [%lx], excp_regs [%lx]\n",
-				thread, aee_excp_regs);
+				(unsigned long)thread,
+				(unsigned long)aee_excp_regs);
 			excp_regs = aee_excp_regs;
 		}
 		aee_nested_printf("Nested panic\n");

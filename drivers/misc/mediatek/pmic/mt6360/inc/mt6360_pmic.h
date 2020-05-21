@@ -2,7 +2,6 @@
  *  drivers/misc/mediatek/pmic/mt6360/inc/mt6360_pmic.h
  *
  *  Copyright (C) 2018 Mediatek Technology Corp.
- *  Copyright (C) 2019 XiaoMi, Inc.
  *  cy_huang <cy_huang@richtek.com>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -49,11 +48,7 @@ struct mt6360_pmic_platform_data {
 	int irq_res_cnt;
 	u32 buck1_lp_vout;
 	u32 buck2_lp_vout;
-	u8 sys_ctrls[MT6360_SYS_CTRLS_NUM];
-	u8 buck1_ctrls[MT6360_BUCK_CTRLS_NUM];
-	u8 buck2_ctrls[MT6360_BUCK_CTRLS_NUM];
-	u8 ldo6_ctrls[MT6360_LDO_CTRLS_NUM];
-	u8 ldo7_ctrls[MT6360_LDO_CTRLS_NUM];
+	u8 pwr_off_seq[MT6360_PMIC_MAX];
 };
 
 struct mt6360_pmic_info {

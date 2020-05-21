@@ -25506,20 +25506,6 @@ unsigned int mt6359_upmu_set_bif_command_type(unsigned int val)
 	return ret;
 }
 
-unsigned int mt6359_upmu_set_bif_trasfer_num(unsigned int val)
-{
-	unsigned int ret = 0;
-
-	ret = pmic_config_interface(
-		(MT6359_BIF_CON15),
-		(val),
-		(PMIC_BIF_TRASFER_NUM_MASK),
-		(PMIC_BIF_TRASFER_NUM_SHIFT)
-			);
-
-	return ret;
-}
-
 unsigned int mt6359_upmu_set_bif_logic_0_set(unsigned int val)
 {
 	unsigned int ret = 0;

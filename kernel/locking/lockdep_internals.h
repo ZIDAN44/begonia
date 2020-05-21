@@ -111,7 +111,6 @@ extern unsigned int max_bfs_queue_depth;
 #ifdef CONFIG_PROVE_LOCKING
 extern unsigned long lockdep_count_forward_deps(struct lock_class *);
 extern unsigned long lockdep_count_backward_deps(struct lock_class *);
-extern bool is_critical_lock_held(void);
 #else
 static inline unsigned long
 lockdep_count_forward_deps(struct lock_class *class)
@@ -120,10 +119,6 @@ lockdep_count_forward_deps(struct lock_class *class)
 }
 static inline unsigned long
 lockdep_count_backward_deps(struct lock_class *class)
-{
-	return 0;
-}
-static inline bool is_critical_lock_held(void)
 {
 	return 0;
 }

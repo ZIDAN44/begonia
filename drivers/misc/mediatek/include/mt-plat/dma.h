@@ -103,8 +103,9 @@ struct mt_gdma_conf {
 	unsigned int wplen;
 	unsigned int wpto;
 	/* unsigned int cohen; */
+	unsigned int sec;
 	unsigned int domain;
-	void (*isr_cb)(void *data);
+	void (*isr_cb)(void *param);
 	void *data;
 };
 

@@ -168,6 +168,9 @@ static int fgauge_set_info(
 	else if (ginfo == GAUGE_IS_NVRAM_FAIL_MODE)
 		pmic_config_interface(
 		PMIC_RG_SYSTEM_INFO_CON0_ADDR, value, 0x0001, 0x4);
+	else if (ginfo == GAUGE_MONITOR_SOFF_VALIDTIME)
+		pmic_config_interface(
+		PMIC_RG_SYSTEM_INFO_CON0_ADDR, value, 0x0001, 0x5);
 	else if (ginfo == GAUGE_CON0_SOC) {
 		value = value / 100;
 		pmic_config_interface(
@@ -200,6 +203,9 @@ static int fgauge_get_info(
 	else if (ginfo == GAUGE_IS_NVRAM_FAIL_MODE)
 		pmic_read_interface(
 			PMIC_RG_SYSTEM_INFO_CON0_ADDR, value, 0x0001, 0x4);
+	else if (ginfo == GAUGE_MONITOR_SOFF_VALIDTIME)
+		pmic_read_interface(
+			PMIC_RG_SYSTEM_INFO_CON0_ADDR, value, 0x0001, 0x5);
 	else if (ginfo == GAUGE_CON0_SOC)
 		pmic_read_interface(
 			PMIC_RG_SYSTEM_INFO_CON0_ADDR, value, 0x007F, 0x9);
@@ -896,6 +902,7 @@ static int fgauge_initial(struct gauge_device *gauge_dev)
 	int bat_flag = 0;
 	int is_charger_exist;
 	unsigned int temps = 0;
+	unsigned int slp_cur_th = 0;
 
 	temps = pmic_get_register_value(PMIC_RG_FG_OFFSET_SWAP);
 	pmic_set_register_value(PMIC_RG_FG_OFFSET_SWAP, 0);
@@ -910,12 +917,19 @@ static int fgauge_initial(struct gauge_device *gauge_dev)
 
 
 	pmic_set_register_value(PMIC_AUXADC_NAG_PRD, 10);
+
+	/* modify slp_cur_th, mt6358 only */
+	pmic_set_register_value(PMIC_FG_SOFF_SLP_CUR_TH, 0x7C);
+	mdelay(1);
+	slp_cur_th = pmic_get_register_value(PMIC_FG_SOFF_SLP_CUR_TH);
+
 	fgauge_get_info(gauge_dev, GAUGE_BAT_PLUG_STATUS, &bat_flag);
 	fgauge_get_info(gauge_dev, GAUGE_PL_CHARGING_STATUS, &is_charger_exist);
 
-	bm_err("bat_plug:%d chr:%d info:0x%x\n",
+	bm_err("bat_plug:%d chr:%d info:0x%x, slp_cur_th:%x\n",
 		bat_flag, is_charger_exist,
-		upmu_get_reg_value(PMIC_RG_SYSTEM_INFO_CON0_ADDR));
+		upmu_get_reg_value(PMIC_RG_SYSTEM_INFO_CON0_ADDR),
+		slp_cur_th);
 
 	get_mtk_battery()->hw_status.pl_charger_status = is_charger_exist;
 
@@ -1532,6 +1546,12 @@ int read_hw_ocv(struct gauge_device *gauge_dev, int *data)
 		zcv_tmp_1st = zcv_tmp;
 		zcv_1st_read = true;
 	}
+
+	gauge_dev->fg_hw_info.pmic_zcv = _hw_ocv_58_pon;
+	gauge_dev->fg_hw_info.pmic_zcv_rdy = _hw_ocv_58_pon_rdy;
+	gauge_dev->fg_hw_info.charger_zcv = _hw_ocv_chgin;
+	gauge_dev->fg_hw_info.hw_zcv = _hw_ocv;
+
 
 	bm_err("[%s] g_fg_is_charger_exist %d _hw_ocv_chgin_rdy %d pl:%d %d\n",
 		__func__,
@@ -2187,7 +2207,7 @@ static int fgauge_enable_zcv_interrupt(struct gauge_device *gauge_dev, int en)
 	if (en == 0) {
 		gauge_enable_interrupt(FG_ZCV_NO, en);
 		pmic_set_register_value(PMIC_FG_ZCV_DET_EN, en);
-		mdelay(100);
+		mdelay(3);
 	}
 	if (en == 1) {
 		gauge_enable_interrupt(FG_ZCV_NO, en);
@@ -2201,10 +2221,15 @@ static int fgauge_enable_zcv_interrupt(struct gauge_device *gauge_dev, int en)
 
 static int fgauge_set_zcv_interrupt_threshold(
 	struct gauge_device *gauge_dev,
-	int threshold)
+	int zcv_avg_current)
 {
 	int fg_zcv_det_time = gauge_dev->fg_cust_data->zcv_suspend_time;
-	int fg_zcv_car_th = threshold;
+	int fg_zcv_car_th = 0;
+
+	fg_zcv_car_th = (fg_zcv_det_time + 1) * 4 * zcv_avg_current / 60;
+
+	bm_err("[%s] current:%d, fg_zcv_det_time:%d, fg_zcv_car_th:%d\n",
+		__func__, zcv_avg_current, fg_zcv_det_time, fg_zcv_car_th);
 
 	fgauge_set_zcv_intr_internal(
 		gauge_dev, fg_zcv_det_time, fg_zcv_car_th);

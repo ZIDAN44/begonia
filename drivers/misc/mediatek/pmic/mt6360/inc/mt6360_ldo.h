@@ -2,7 +2,6 @@
  *  drivers/misc/mediatek/pmic/mt6360/inc/mt6360_ldo.h
  *
  *  Copyright (C) 2018 Mediatek Technology Corp.
- *  Copyright (C) 2019 XiaoMi, Inc.
  *  cy_huang <cy_huang@richtek.com>
  *
  *  This program is free software; you can redistribute it and/or modify
@@ -45,10 +44,7 @@ struct mt6360_ldo_platform_data {
 	struct regulator_init_data *init_data[MT6360_LDO_MAX];
 	struct resource *irq_res;
 	int irq_res_cnt;
-	u8 ldo1_ctrls[MT6360_LDO_CTRLS_NUM];
-	u8 ldo2_ctrls[MT6360_LDO_CTRLS_NUM];
-	u8 ldo3_ctrls[MT6360_LDO_CTRLS_NUM];
-	u8 ldo5_ctrls[MT6360_LDO_CTRLS_NUM];
+	u32 sdcard_det_en;
 };
 
 struct mt6360_ldo_info {

@@ -61,6 +61,10 @@ static int pmic_read_device(struct regmap *map,
 {
 	int ret = 0;
 #if defined(CONFIG_PMIC_HW_ACCESS_EN)
+	if (!map) {
+		pr_notice("[%s] regmap not ready\n", __func__);
+		return -ENODEV;
+	}
 	ret = regmap_read(map, RegNum, val);
 	if (ret) {
 		dev_notice(chip->dev,
@@ -87,6 +91,10 @@ static int pmic_write_device(struct regmap *map,
 {
 	int ret = 0;
 #if defined(CONFIG_PMIC_HW_ACCESS_EN)
+	if (!map) {
+		pr_notice("[%s] regmap not ready\n", __func__);
+		return -ENODEV;
+	}
 	ret = regmap_update_bits(map, RegNum, (MASK << SHIFT), (val << SHIFT));
 	if (ret) {
 		dev_notice(chip->dev,
@@ -110,6 +118,10 @@ unsigned int pmic_read_interface(unsigned int RegNum,
 {
 	int ret;
 
+	if (!chip) {
+		pr_notice("[%s] PMIC not ready\n", __func__);
+		return -ENODEV;
+	}
 	ret = pmic_read_device(chip->regmap, RegNum, val, MASK, SHIFT);
 	return abs(ret);
 }
@@ -127,6 +139,10 @@ unsigned int pmic_config_interface(unsigned int RegNum,
 	    oops_in_progress)
 		return pmic_config_interface_nolock(RegNum, val, MASK, SHIFT);
 
+	if (!chip) {
+		pr_notice("[%s] PMIC not ready\n", __func__);
+		return -ENODEV;
+	}
 	ret = pmic_write_device(chip->regmap, RegNum, val, MASK, SHIFT);
 	return ret;
 }
@@ -286,11 +302,12 @@ static long pmic_ftm_ioctl(struct file *file,
 			   unsigned long arg)
 {
 	void __user *user_data = (void __user *)arg;
+	int adc_in_data[2] = { 1, 1 };
 	int adc_out_data[2] = { 1, 1 };
 
-	if (sizeof(arg) != sizeof(adc_out_data))
+	/* adc_in_data is used to check userspace data size */
+	if (copy_from_user(adc_in_data, user_data, sizeof(adc_in_data)))
 		return -EFAULT;
-
 	switch (cmd) {
 	case Get_IS_EXT_BUCK_EXIST:
 #ifdef CONFIG_MTK_EXTBUCK

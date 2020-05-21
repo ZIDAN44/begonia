@@ -32,7 +32,7 @@ struct mt6370_pmu_bled_data {
 static uint8_t bled_init_data[] = {
 	0x42, /* MT6370_PMU_REG_BLEN */
 	0x89, /* MT6370_PMU_REG_BLBSTCTRL */
-	0x04, /* MT6370_PMU_REG_BLPWM */
+	0x00, /* MT6370_PMU_REG_BLPWM */
 	0x00, /* MT6370_PMU_REG_BLCTRL */
 	0x00, /* MT6370_PMU_REG_BLDIM2 */
 	0x00, /* MT6370_PMU_REG_BLDIM1 */
@@ -474,9 +474,9 @@ static inline int mt_parse_dt(struct device *dev)
 	else
 		pdata->pwm_deglitch = tmp;
 	if (of_property_read_u32(np, "mt,pwm_hys_en", &tmp) < 0)
-		pdata->pwm_hys = 0x1;
+		pdata->pwm_hys_en = 0x1;
 	else
-		pdata->pwm_hys = tmp;
+		pdata->pwm_hys_en = tmp;
 	if (of_property_read_u32(np, "mt,pwm_hys", &tmp) < 0)
 		pdata->pwm_hys = 0x0;	/* 1 bit */
 	else

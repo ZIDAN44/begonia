@@ -30,6 +30,7 @@
 #include <linux/elfcore.h>
 #include <linux/kexec.h>
 #include <asm/pgtable.h>
+#include <asm/kexec.h>
 #include <linux/processor.h>
 #include <mtk_wd_api.h>
 #if defined(CONFIG_FIQ_GLUE)
@@ -164,8 +165,7 @@ static void mrdump_stop_noncore_cpu(void *unused)
 
 	atomic_dec(&waiting_for_crash_ipi);
 	if (cpu >= 0) {
-		mrdump_save_current_backtrace(&regs);
-
+		crash_setup_regs(&regs, NULL);
 		elf_core_copy_kernel_regs(
 			(elf_gregset_t *)&crash_record->cpu_regs[cpu], &regs);
 		crash_save_cpu((struct pt_regs *)&regs, cpu);
@@ -252,7 +252,9 @@ void __mrdump_create_oops_dump(enum AEE_REBOOT_MODE reboot_mode,
 		local_fiq_disable();
 
 #if defined(CONFIG_SMP)
-		__mrdump_reboot_stop_all(crash_record);
+		if ((reboot_mode != AEE_REBOOT_MODE_WDT) &&
+		    (reboot_mode != AEE_REBOOT_MODE_GZ_WDT))
+			__mrdump_reboot_stop_all(crash_record);
 #endif
 
 		cpu = get_HW_cpuid();
@@ -279,7 +281,7 @@ void __mrdump_create_oops_dump(enum AEE_REBOOT_MODE reboot_mode,
 		crash_record->fault_cpu = cpu;
 
 		/* FIXME: Check reboot_mode is valid */
-			crash_record->reboot_mode = reboot_mode;
+		crash_record->reboot_mode = reboot_mode;
 	}
 }
 

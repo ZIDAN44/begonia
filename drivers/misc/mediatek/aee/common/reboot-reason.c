@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2015 MediaTek Inc.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This program is free software: you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 as
@@ -22,7 +23,6 @@
 #include <linux/mm.h>
 #include <linux/sched.h>
 #include <asm/memory.h>
-#include <linux/elf.h>
 #ifdef CONFIG_MTK_WATCHDOG
 #include <mtk_wd_api.h>
 #endif
@@ -30,7 +30,6 @@
 #include <mt-plat/mtk_ram_console.h>
 #endif
 #include <mt-plat/aee.h>
-#include <mrdump.h>
 #include "aee-common.h"
 
 #define RR_PROC_NAME "reboot-reason"
@@ -113,10 +112,6 @@ static ssize_t powerup_reason_show(struct kobject *kobj,
 					br_ptr_e - br_ptr - 23);
 			boot_reason[br_ptr_e - br_ptr - 23] = '\0';
 		}
-#ifdef CONFIG_MTK_RAM_CONSOLE
-		if (aee_rr_last_fiq_step() != 0)
-			strncpy(boot_reason, "kpanic", 7);
-#endif
 		if (!strncmp(boot_reason, "2sec_reboot",
 					strlen("2sec_reboot"))) {
 			br_ptr = strstr(saved_command_line,

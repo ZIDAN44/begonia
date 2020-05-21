@@ -2,7 +2,6 @@
  *  linux/kernel/printk.c
  *
  *  Copyright (C) 1991, 1992  Linus Torvalds
- *  Copyright (C) 2019 XiaoMi, Inc.
  *
  * Modified to make sys_syslog() more flexible: added commands to
  * return the last 4k of kernel messages, regardless of whether
@@ -1273,12 +1272,7 @@ static void __init log_buf_len_update(unsigned size)
 /* save requested log_buf_len since it's too early to process it */
 static int __init log_buf_len_setup(char *str)
 {
-	unsigned int size;
-
-	if (!str)
-		return -EINVAL;
-
-	size = memparse(str, &str);
+	unsigned int size = memparse(str, &str);
 
 	log_buf_len_update(size);
 
@@ -2121,6 +2115,7 @@ int vprintk_store(int facility, int level,
 	char *text = textbuf;
 	size_t text_len;
 	enum log_flags lflags = 0;
+
 	/*
 	 * The printf needs to come first; we need the syslog
 	 * prefix which might be passed-in as a parameter.
@@ -2160,9 +2155,10 @@ int vprintk_store(int facility, int level,
 
 	if (dict)
 		lflags |= LOG_PREFIX|LOG_NEWLINE;
+
 	/* MTK_prefix */
 #ifdef CONFIG_PRINTK_MT_PREFIX
-    /* if irqs_disabled() is true*/
+	/* if irqs_disabled() is true*/
 	if (isIrqsDisabled)
 		this_cpu_write(printk_state, '-');
 #ifdef CONFIG_MTK_PRINTK_UART_CONSOLE
@@ -2173,6 +2169,7 @@ int vprintk_store(int facility, int level,
 	else
 		this_cpu_write(printk_state, ' ');
 #endif
+
 	return log_output(facility, level, lflags,
 			  dict, dictlen, text, text_len);
 }
@@ -2195,6 +2192,7 @@ asmlinkage int vprintk_emit(int facility, int level,
 
 	boot_delay_msec(level);
 	printk_delay();
+
 	/* This stops the holder of console_sem just where we want him */
 	logbuf_lock_irqsave(flags);
 	printed_len = vprintk_store(facility, level, dict, dictlen, fmt, args);
@@ -2203,19 +2201,12 @@ asmlinkage int vprintk_emit(int facility, int level,
 	/* If called from the scheduler, we can not call up(). */
 	if (!in_sched) {
 		/*
-		 * Disable preemption to avoid being preempted while holding
-		 * console_sem which would prevent anyone from printing to
-		 * console
-		 */
-		preempt_disable();
-		/*
 		 * Try to acquire and then immediately release the console
 		 * semaphore.  The release will print out buffers and wake up
 		 * /dev/kmsg and syslog() users.
 		 */
 		if (console_trylock_spinning())
 			console_unlock();
-		preempt_enable();
 	}
 
 	return printed_len;
@@ -2596,7 +2587,20 @@ int console_trylock(void)
 		return 0;
 	}
 	console_locked = 1;
-	console_may_schedule = 0;
+	/*
+	 * When PREEMPT_COUNT disabled we can't reliably detect if it's
+	 * safe to schedule (e.g. calling printk while holding a spin_lock),
+	 * because preempt_disable()/preempt_enable() are just barriers there
+	 * and preempt_count() is always 0.
+	 *
+	 * RCU read sections have a separate preemption counter when
+	 * PREEMPT_RCU enabled thus we must take extra care and check
+	 * rcu_preempt_depth(), otherwise RCU read sections modify
+	 * preempt_count().
+	 */
+	console_may_schedule = !oops_in_progress &&
+			preemptible() &&
+			!rcu_preempt_depth();
 	return 1;
 }
 EXPORT_SYMBOL(console_trylock);
@@ -3776,7 +3780,7 @@ void show_regs_print_info(const char *log_lvl)
 }
 
 void get_kernel_log_buffer(unsigned long *addr,
-	unsigned long *size, unsigned long *start)
+unsigned long *size, unsigned long *start)
 {
 	*addr = (unsigned long)log_buf;
 	*size = log_buf_len;
