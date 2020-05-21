@@ -1,5 +1,6 @@
 /*
  *  Copyright (C) 2012-2013 Samsung Electronics Co., Ltd.
+ *  Copyright (C) 2020 XiaoMi, Inc.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -294,7 +295,7 @@ __defrag_validate_cluster_prev(
 	if (chunk->prev_clus == 0) {
 		/* For the first cluster of a file */
 		dir.dir = GET64_HI(chunk->i_pos);
-		dir.flags = 0x1;
+		dir.flags = 0x1;	// Assume non-continuous
 
 		entry = GET64_LO(chunk->i_pos);
 
@@ -824,7 +825,7 @@ __defrag_update_dirent(
 	int err = 0;
 
 	dir.dir = GET64_HI(chunk->i_pos);
-	dir.flags = 0x1;
+	dir.flags = 0x1;	// Assume non-continuous
 
 	entry = GET64_LO(chunk->i_pos);
 

@@ -164,11 +164,11 @@ static inline long __trace_sched_switch_state(bool preempt, struct task_struct *
 {
 #ifdef CONFIG_MTK_SCHED_TRACERS
 	long state = p->state;
-#else
 	/*
 	 * M:mark as comment to export more task state for
 	 * migration & wakeup
 	 */
+#else
 	unsigned int state;
 #endif
 
@@ -198,7 +198,6 @@ static inline long __trace_sched_switch_state(bool preempt, struct task_struct *
 #else
 	if (preempt)
 		return TASK_REPORT_MAX;
-
 	/*
 	 * task_state_index() uses fls() and returns a value from 0-8 range.
 	 * Decrement it by 1 (except TASK_RUNNING state i.e 0) before using
@@ -472,37 +471,6 @@ TRACE_EVENT(sched_process_fork,
 	TP_printk("comm=%s pid=%d child_comm=%s child_pid=%d",
 		__entry->parent_comm, __entry->parent_pid,
 		__entry->child_comm, __entry->child_pid)
-);
-
-/*
- * Tracepoint for fork time:
- */
-TRACE_EVENT(sched_fork_time,
-
-	TP_PROTO(struct task_struct *parent,
-		 struct task_struct *child, unsigned long long dur),
-
-	TP_ARGS(parent, child, dur),
-
-	TP_STRUCT__entry(
-		__array(char,	parent_comm,	TASK_COMM_LEN)
-		__field(pid_t,	parent_pid)
-		__array(char,	child_comm,	TASK_COMM_LEN)
-		__field(pid_t,	child_pid)
-		__field(unsigned long long,	dur)
-	),
-
-	TP_fast_assign(
-		memcpy(__entry->parent_comm, parent->comm, TASK_COMM_LEN);
-		__entry->parent_pid	= parent->pid;
-		memcpy(__entry->child_comm, child->comm, TASK_COMM_LEN);
-		__entry->child_pid	= child->pid;
-		__entry->dur = dur;
-	),
-
-	TP_printk("comm=%s pid=%d child_comm=%s child_pid=%d fork_time=%llu us",
-		__entry->parent_comm, __entry->parent_pid,
-		__entry->child_comm, __entry->child_pid, __entry->dur)
 );
 
 /*
@@ -980,7 +948,8 @@ TRACE_EVENT(sched_load_se,
 		__entry->cpu = __trace_sched_cpu(gcfs_rq, se);
 		__trace_sched_path(gcfs_rq, __get_dynamic_array(path),
 				   __get_dynamic_array_len(path));
-		memcpy(__entry->comm, p ? p->comm : "(null)", TASK_COMM_LEN);
+		memcpy(__entry->comm, p ? p->comm : "(null)",
+				      p ? TASK_COMM_LEN : sizeof("(null)"));
 		__entry->pid = p ? p->pid : -1;
 		__entry->load = se->avg.load_avg;
 		__entry->util = se->avg.util_avg;

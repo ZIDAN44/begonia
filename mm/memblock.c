@@ -696,7 +696,6 @@ static int __init_memblock memblock_remove_range(struct memblock_type *type,
 
 int __init_memblock memblock_remove(phys_addr_t base, phys_addr_t size)
 {
-	kmemleak_free_part(__va(base), size);
 	return memblock_remove_range(&memblock.memory, base, size);
 }
 
@@ -935,7 +934,7 @@ void __init_memblock __next_mem_range(u64 *idx, int nid, ulong flags,
 			r = &type_b->regions[idx_b];
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
-				r->base : ULLONG_MAX;
+				r->base : (phys_addr_t)ULLONG_MAX;
 
 			/*
 			 * if idx_b advanced past idx_a,
@@ -1051,7 +1050,7 @@ void __init_memblock __next_mem_range_rev(u64 *idx, int nid, ulong flags,
 			r = &type_b->regions[idx_b];
 			r_start = idx_b ? r[-1].base + r[-1].size : 0;
 			r_end = idx_b < type_b->cnt ?
-				r->base : ULLONG_MAX;
+				r->base : (phys_addr_t)ULLONG_MAX;
 			/*
 			 * if idx_b advanced past idx_a,
 			 * break out to advance idx_a

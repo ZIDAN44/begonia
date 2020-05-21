@@ -418,23 +418,23 @@ TRACE_EVENT(trigger_lowmem_hint,
 	TP_PROTO(
 		long mm_free,
 		long mm_thrash
-		),
+	),
 
 	TP_ARGS(mm_free, mm_thrash),
 
 	TP_STRUCT__entry(
 		__field(long, mm_free)
 		__field(long, mm_thrash)
-		),
+	),
 
 	TP_fast_assign(
 		__entry->mm_free = mm_free;
 		__entry->mm_thrash = mm_thrash;
-		),
+	),
 
 	TP_printk("free=%ld thrash=%ld",
 		__entry->mm_free, __entry->mm_thrash
-		)
+	)
 );
 
 TRACE_EVENT(lowmem_hint_uevent,
@@ -483,24 +483,29 @@ TRACE_EVENT(perf_index_s,
 	),
 
 	TP_fast_assign(
-		__entry->sf0	=  sf0;
-		__entry->sf1    =  sf1;
-		__entry->sf2    =  sf2;
+		__entry->sf0       = sf0;
+		__entry->sf1       = sf1;
+		__entry->sf2       = sf2;
 		__entry->dram_freq = dram_freq;
-		__entry->bw_c     = bw_c;
-		__entry->bw_g     = bw_g;
-		__entry->bw_mm    = bw_mm;
-		__entry->bw_total = bw_total;
+		__entry->bw_c      = bw_c;
+		__entry->bw_g      = bw_g;
+		__entry->bw_mm     = bw_mm;
+		__entry->bw_total  = bw_total;
 	),
 
 	TP_printk("sched_freq=%d|%d|%d dram_freq=%d bw=%d|%d|%d|%d",
-	__entry->sf0, __entry->sf1, __entry->sf2,
-	__entry->dram_freq,
-	__entry->bw_c,  __entry->bw_g,  __entry->bw_mm,  __entry->bw_total)
+		__entry->sf0,
+		__entry->sf1,
+		__entry->sf2,
+		__entry->dram_freq,
+		__entry->bw_c,
+		__entry->bw_g,
+		__entry->bw_mm,
+		__entry->bw_total)
 );
 
 
-TRACE_EVENT(perf_index_l,
+	TRACE_EVENT(perf_index_l,
 
 	TP_PROTO(
 		long free_mem,
@@ -527,7 +532,7 @@ TRACE_EVENT(perf_index_l,
 		io_dur,
 		io_q_dept,
 		stall
-	),
+),
 
 	TP_STRUCT__entry(
 		__field(long, free_mem)

@@ -56,10 +56,6 @@ dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 		unsigned long offset, size_t size, int prot);
 int iommu_dma_map_sg(struct device *dev, struct scatterlist *sg,
 		int nents, int prot);
-#ifdef CONFIG_MTK_IOMMU_V2
-dma_addr_t iommu_dma_map_sg_fixed(struct device *dev, struct scatterlist *sg,
-		int nents, int prot, dma_addr_t dma_limit);
-#endif
 
 /*
  * Arch code with no special attribute handling may use these
@@ -78,7 +74,11 @@ int iommu_dma_mapping_error(struct device *dev, dma_addr_t dma_addr);
 /* The DMA API isn't _quite_ the whole story, though... */
 void iommu_dma_map_msi_msg(int irq, struct msi_msg *msg);
 void iommu_dma_get_resv_regions(struct device *dev, struct list_head *list);
-
+#ifdef CONFIG_MTK_IOMMU_V2
+void iommu_dma_dump_iovad(struct iommu_domain *domain);
+int iommu_dma_get_iovad_info(struct device *dev,
+	unsigned long *base, unsigned long *max);
+#endif
 #else
 
 struct iommu_domain;

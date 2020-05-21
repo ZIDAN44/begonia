@@ -2,6 +2,7 @@
  *  linux/mm/memory.c
  *
  *  Copyright (C) 1991, 1992, 1993, 1994  Linus Torvalds
+ *  Copyright (C) 2020 XiaoMi, Inc.
  */
 
 /*
@@ -71,6 +72,8 @@
 #include <linux/dax.h>
 #include <linux/oom.h>
 
+#include <trace/events/kmem.h>
+
 #include <asm/io.h>
 #include <asm/mmu_context.h>
 #include <asm/pgalloc.h>
@@ -82,6 +85,7 @@
 #include "internal.h"
 
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+#define SPECULATIVE_PAGE_FAULT_SUPPORT_FILEMAP 1
 int sysctl_speculative_page_fault = 1;
 #endif
 
@@ -144,6 +148,21 @@ static int __init init_zero_pfn(void)
 }
 core_initcall(init_zero_pfn);
 
+/*
+ * This threshold is the boundary in the value space, that the counter has to
+ * advance before we trace it. Should be a power of 2. It is to reduce unwanted
+ * trace overhead. The counter is number of pages.
+ */
+#define TRACE_MM_COUNTER_THRESHOLD 128
+
+void mm_trace_rss_stat(int member, long count, long value)
+{
+	long thresh_mask = ~(TRACE_MM_COUNTER_THRESHOLD - 1);
+
+	/* Threshold roll-over, trace it */
+	if ((count & thresh_mask) != ((count - value) & thresh_mask))
+		trace_rss_stat(member, count);
+}
 
 #if defined(SPLIT_RSS_COUNTING)
 
@@ -1828,7 +1847,8 @@ static int insert_pfn(struct vm_area_struct *vma, unsigned long addr,
 				goto out_unlock;
 			}
 			entry = pte_mkyoung(*pte);
-			entry = maybe_mkwrite(pte_mkdirty(entry), vma->vm_flags);
+			entry = maybe_mkwrite(pte_mkdirty(entry),
+					      vma->vm_flags);
 			if (ptep_set_access_flags(vma, addr, pte, entry, 1))
 				update_mmu_cache(vma, addr, pte);
 		}
@@ -3040,6 +3060,7 @@ int do_swap_page(struct vm_fault *vmf)
 	int exclusive = 0;
 	int ret;
 	bool vma_readahead = swap_use_vma_readahead();
+	bool vma_readmore = vma_readahead || !!page_cluster;
 
 	if (vma_readahead)
 		page = swap_readahead_detect(vmf, &swap_ra);
@@ -3084,7 +3105,7 @@ int do_swap_page(struct vm_fault *vmf)
 		page = lookup_swap_cache(entry, vma_readahead ? vma : NULL,
 					 vmf->address);
 	if (!page) {
-		if (vmf->flags & FAULT_FLAG_SPECULATIVE) {
+		if (vma_readmore && (vmf->flags & FAULT_FLAG_SPECULATIVE)) {
 			/*
 			 * Don't try readahead during a speculative page fault
 			 * as the VMA's boundaries may change in our back.
@@ -3941,10 +3962,14 @@ static int do_fault(struct vm_fault *vmf)
 		if (unlikely(!pmd_present(*vmf->pmd)))
 			ret = VM_FAULT_SIGBUS;
 		else {
-			vmf->pte = pte_offset_map_lock(vmf->vma->vm_mm,
-						       vmf->pmd,
-						       vmf->address,
-						       &vmf->ptl);
+			/*
+			 * Back out if the VMA has changed in our back during
+			 * a speculative page fault or if somebody else
+			 * faulted in this pte while we released the pte lock.
+			 */
+			if (!pte_map_lock(vmf))
+				return VM_FAULT_RETRY;
+
 			/*
 			 * Make sure this is not a temporary clearing of pte
 			 * by holding ptl and checking again. A R/M/W update
@@ -4006,8 +4031,10 @@ static int do_numa_page(struct vm_fault *vmf)
 	 * validation through pte_unmap_same(). It's of NUMA type but
 	 * the pfn may be screwed if the read is non atomic.
 	 */
-	if (!pte_spinlock(vmf))
+	if (!pte_spinlock(vmf)) {
+		pte_unmap(vmf->pte);
 		return VM_FAULT_RETRY;
+	}
 	if (unlikely(!pte_same(*vmf->pte, vmf->orig_pte))) {
 		pte_unmap_unlock(vmf->pte, vmf->ptl);
 		goto out;
@@ -4201,8 +4228,10 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	if (!vmf->pte) {
 		if (vma_is_anonymous(vmf->vma))
 			return do_anonymous_page(vmf);
+#ifndef SPECULATIVE_PAGE_FAULT_SUPPORT_FILEMAP
 		else if (vmf->flags & FAULT_FLAG_SPECULATIVE)
 			return VM_FAULT_RETRY;
+#endif
 		else
 			return do_fault(vmf);
 	}
@@ -4213,8 +4242,10 @@ static int handle_pte_fault(struct vm_fault *vmf)
 	if (pte_protnone(vmf->orig_pte) && vma_is_accessible(vmf->vma))
 		return do_numa_page(vmf);
 
-	if (!pte_spinlock(vmf))
+	if (!pte_spinlock(vmf)) {
+		pte_unmap(vmf->pte);
 		return VM_FAULT_RETRY;
+	}
 	entry = vmf->orig_pte;
 	if (unlikely(!pte_same(*vmf->pte, entry)))
 		goto unlock;
@@ -4337,18 +4368,51 @@ static int __handle_mm_fault(struct vm_area_struct *vma, unsigned long address,
 }
 
 #ifdef CONFIG_SPECULATIVE_PAGE_FAULT
+
+#ifndef spf_pxd_flunked
+static inline bool spf_pgd_flunked(pgd_t *pgd)
+{
+	pgd_t pgdval;
+
+	pgdval = READ_ONCE(*pgd);
+	if (pgd_none(pgdval) || unlikely(pgd_bad(pgdval)))
+		return true;
+
+	return false;
+}
+
+static inline bool spf_p4d_flunked(p4d_t *p4d)
+{
+	p4d_t p4dval;
+
+	p4dval = READ_ONCE(*p4d);
+	if (p4d_none(p4dval) || unlikely(p4d_bad(p4dval)))
+		return true;
+
+	return false;
+}
+#endif
+
+#ifndef spf_access_check
+static inline bool spf_access_error(unsigned long access_vm,
+				  unsigned long vma_flags)
+{
+	return vma_flags & access_vm ? false : true;
+}
+#endif
+
 /*
  * Tries to handle the page fault in a speculative way, without grabbing the
  * mmap_sem.
  */
 int __handle_speculative_fault(struct mm_struct *mm, unsigned long address,
-			       unsigned int flags)
+			       unsigned int flags, unsigned long access_vm)
 {
 	struct vm_fault vmf = {
 		.address = address,
 	};
-	pgd_t *pgd, pgdval;
-	p4d_t *p4d, p4dval;
+	pgd_t *pgd;
+	p4d_t *p4d;
 	pud_t pudval;
 	int seq, ret = VM_FAULT_RETRY;
 	struct vm_area_struct *vma;
@@ -4369,24 +4433,48 @@ int __handle_speculative_fault(struct mm_struct *mm, unsigned long address,
 	if (seq & 1)
 		goto out_put;
 
-	/*
-	 * Can't call vm_ops service has we don't know what they would do
-	 * with the VMA.
-	 * This include huge page from hugetlbfs.
-	 */
-	if (vma->vm_ops)
-		goto out_put;
-
-	/*
-	 * __anon_vma_prepare() requires the mmap_sem to be held
-	 * because vm_next and vm_prev must be safe. This can't be guaranteed
-	 * in the speculative path.
-	 */
-	if (unlikely(!vma->anon_vma))
-		goto out_put;
-
 	vmf.vma_flags = READ_ONCE(vma->vm_flags);
 	vmf.vma_page_prot = READ_ONCE(vma->vm_page_prot);
+
+	/* check whether it is an access_error */
+	if (spf_access_error(access_vm, vmf.vma_flags))
+		goto out_put;
+
+	if (vma_is_anonymous(vma)) {
+		/*
+		 * __anon_vma_prepare() requires the mmap_sem to be held
+		 * because vm_next and vm_prev must be safe. This can't be
+		 * guaranteed in the speculative path.
+		 */
+		if (unlikely(!vma->anon_vma))
+			goto out_put;
+	} else {
+#ifdef SPECULATIVE_PAGE_FAULT_SUPPORT_FILEMAP
+		/*
+		 * A file's MAP_PRIVATE vma may be in anon_vma. So let's check
+		 * whether it is ready to avoid __anon_vma_prepare().
+		 * (for details, please find above comments)
+		 */
+		if (((vmf.vma_flags & (VM_SHARED | VM_WRITE)) == VM_WRITE) &&
+				unlikely(!vma->anon_vma))
+			goto out_put;
+
+		/*
+		 * Is it suitable for SPF?
+		 * Now we only support filemap_fault handler or the vm_ops with
+		 * suitable_for_spf set as true
+		 */
+		if (vma->vm_ops->fault != filemap_fault &&
+				!vma->vm_ops->suitable_for_spf)
+			goto out_put;
+#else
+		/*
+		 * Can't call vm_ops service has we don't know what they would
+		 * do with the VMA. This include huge page from hugetlbfs.
+		 */
+		goto out_put;
+#endif
+	}
 
 	/* Can't call userland page fault handler in the speculative path */
 	if (unlikely(vmf.vma_flags & VM_UFFD_MISSING))
@@ -4440,13 +4528,11 @@ int __handle_speculative_fault(struct mm_struct *mm, unsigned long address,
 	 */
 	local_irq_disable();
 	pgd = pgd_offset(mm, address);
-	pgdval = READ_ONCE(*pgd);
-	if (pgd_none(pgdval) || unlikely(pgd_bad(pgdval)))
+	if (spf_pgd_flunked(pgd))
 		goto out_walk;
 
 	p4d = p4d_offset(pgd, address);
-	p4dval = READ_ONCE(*p4d);
-	if (p4d_none(p4dval) || unlikely(p4d_bad(p4dval)))
+	if (spf_p4d_flunked(p4d))
 		goto out_walk;
 
 	vmf.pud = pud_offset(p4d, address);
@@ -4505,11 +4591,16 @@ int __handle_speculative_fault(struct mm_struct *mm, unsigned long address,
 	 * We need to re-validate the VMA after checking the bounds, otherwise
 	 * we might have a false positive on the bounds.
 	 */
-	if (read_seqcount_retry(&vma->vm_sequence, seq))
+	if (read_seqcount_retry(&vma->vm_sequence, seq)) {
+		/* If leaving spf earilier, try to unmap the pte */
+		if (vmf.pte)
+			pte_unmap(vmf.pte);
 		goto out_put;
+	}
 
 	mem_cgroup_oom_enable();
 	ret = handle_pte_fault(&vmf);
+	/* NOTE: vmf.pte should be unmapped after handle_pte_fault */
 	mem_cgroup_oom_disable();
 
 	put_vma(vma);

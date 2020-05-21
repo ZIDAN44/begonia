@@ -1,7 +1,7 @@
 /* internal.h: mm/ internal definitions
  *
  * Copyright (C) 2004 Red Hat, Inc. All Rights Reserved.
- * Copyright (C) 2019 XiaoMi, Inc.
+ * Copyright (C) 2020 XiaoMi, Inc.
  * Written by David Howells (dhowells@redhat.com)
  *
  * This program is free software; you can redistribute it and/or
@@ -561,4 +561,6 @@ void setup_zone_pageset(struct zone *zone);
 
 #define IS_ZONE_MOVABLE_CMA_ZONE(z) IS_ZONE_MOVABLE_CMA_ZONE_IDX(\
 					zone_idx(z))
+ssize_t print_max_page_owner(void);
+
 #endif	/* __MM_INTERNAL_H */

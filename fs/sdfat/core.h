@@ -1,5 +1,6 @@
 /*
  *  Copyright (C) 2012-2013 Samsung Electronics Co., Ltd.
+ *  Copyright (C) 2020 XiaoMi, Inc.
  *
  *  This program is free software; you can redistribute it and/or
  *  modify it under the terms of the GNU General Public License
@@ -53,11 +54,11 @@ extern "C" {
 #define ES_ALL_ENTRIES	0
 
 typedef struct {
-	u64	sector;
-	u32	offset;
-	s32	alloc_flag;
+	u64	sector;		// sector number that contains file_entry
+	u32	offset;		// byte offset in the sector
+	s32	alloc_flag;	// flag in stream entry. 01 for cluster chain, 03 for contig. clusters.
 	u32	num_entries;
-	void	*__buf;
+	void	*__buf;		// __buf should be the last member
 } ENTRY_SET_CACHE_T;
 
 
