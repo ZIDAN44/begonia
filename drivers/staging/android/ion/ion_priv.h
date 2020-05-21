@@ -2,6 +2,7 @@
  * drivers/staging/android/ion/ion_priv.h
  *
  * Copyright (C) 2011 MediaTek, Inc.
+ * Copyright (C) 2020 XiaoMi, Inc.
  *
  * This software is licensed under the terms of the GNU General Public
  * License version 2, as published by the Free Software Foundation, and
@@ -30,6 +31,10 @@
 #include "mtk/ion_drv.h"
 
 #include "ion.h"
+
+#ifdef CONFIG_MTK_IOMMU_V2
+#define MTK_ION_DMABUF_SUPPORT
+#endif
 
 struct ion_buffer *ion_handle_buffer(struct ion_handle *handle);
 
@@ -82,6 +87,9 @@ struct ion_buffer {
 	char task_comm[TASK_COMM_LEN];
 	pid_t pid;
 	char alloc_dbg[ION_MM_DBG_NAME_LEN];
+#ifdef MTK_ION_DMABUF_SUPPORT
+	struct list_head attachments;
+#endif
 };
 
 void ion_buffer_destroy(struct ion_buffer *buffer);
@@ -233,6 +241,9 @@ struct ion_heap_ops {
  * @task:		task struct of deferred free thread
  * @debug_show:		called when heap debug file is read to add any
  *			heap specific debug info to output
+ * @num_of_buffers	the number of currently allocated buffers
+ * @num_of_alloc_bytes	the number of allocated bytes
+ * @alloc_bytes_wm	the number of allocated bytes watermark
  *
  * Represents a pool of memory from which buffers can be made.  In some
  * systems the only heap is regular system memory allocated via vmalloc.
@@ -253,8 +264,15 @@ struct ion_heap {
 	spinlock_t free_lock; /* spin lock */
 	wait_queue_head_t waitqueue;
 	struct task_struct *task;
+	u64 num_of_buffers;
+	u64 num_of_alloc_bytes;
+	u64 alloc_bytes_wm;
+
+	/* protect heap statistics */
+	spinlock_t stat_lock;
 
 	int (*debug_show)(struct ion_heap *heap, struct seq_file *, void *);
+	atomic_long_t total_allocated;
 };
 
 /**
@@ -303,11 +321,11 @@ void ion_device_add_heap(struct ion_device *dev, struct ion_heap *heap);
  * and vaddr fields
  */
 void *ion_heap_map_kernel(struct ion_heap *heap,
-	struct ion_buffer *buffer);
+			  struct ion_buffer *buffer);
 void ion_heap_unmap_kernel(struct ion_heap *heap,
-	struct ion_buffer *buffer);
+			   struct ion_buffer *buffer);
 int ion_heap_map_user(struct ion_heap *heap, struct ion_buffer *buffer,
-	struct vm_area_struct *vma);
+		      struct vm_area_struct *vma);
 
 int ion_heap_buffer_zero(struct ion_buffer *buffer);
 int ion_heap_pages_zero(struct page *page, size_t size, pgprot_t pgprot);
@@ -374,8 +392,8 @@ size_t ion_heap_freelist_drain(struct ion_heap *heap, size_t size);
  * flag.
  */
 size_t ion_heap_freelist_shrink(
-	struct ion_heap *heap,
-	size_t size);
+		struct ion_heap *heap,
+					size_t size);
 
 /**
  * ion_heap_freelist_size - returns the size of the freelist in bytes
@@ -395,7 +413,7 @@ struct ion_heap *ion_system_heap_create(struct ion_platform_heap *unused);
 void ion_system_heap_destroy(struct ion_heap *heap);
 
 struct ion_heap *ion_system_contig_heap_create(
-	struct ion_platform_heap *unused);
+		struct ion_platform_heap *unused);
 void ion_system_contig_heap_destroy(struct ion_heap *heap);
 
 struct ion_heap *ion_carveout_heap_create(struct ion_platform_heap *heap_data);
@@ -459,7 +477,7 @@ void ion_page_pool_free(struct ion_page_pool *pool, struct page *page);
  */
 int ion_page_pool_shrink(
 	struct ion_page_pool *pool, gfp_t gfp_mask,
-	int nr_to_scan);
+			  int nr_to_scan);
 
 /**
  * ion_pages_sync_for_device - cache flush pages for use with the specified
@@ -471,33 +489,34 @@ int ion_page_pool_shrink(
  */
 void ion_pages_sync_for_device(
 	struct device *dev, struct page *page,
-	size_t size, enum dma_data_direction dir);
+		size_t size, enum dma_data_direction dir);
 
 long ion_ioctl(struct file *filp, unsigned int cmd, unsigned long arg);
 
 int ion_sync_for_device(struct ion_client *client, int fd);
 
 struct ion_handle *ion_handle_get_by_id_nolock(
-	struct ion_client *client,
-	int id);
+		struct ion_client *client,
+						int id);
 
 void ion_free_nolock(struct ion_client *client, struct ion_handle *handle);
 
 int ion_handle_put_nolock(struct ion_handle *handle);
 
 struct ion_handle *ion_handle_get_by_id(
-	struct ion_client *client,
-	int id);
+		struct ion_client *client,
+						int id);
 
 int ion_handle_put(struct ion_handle *handle);
 
 int ion_query_heaps(struct ion_client *client, struct ion_heap_query *query);
 
+int clone_sg_table(const struct sg_table *source, struct sg_table *dest);
+
 extern struct ion_device *g_ion_device;
-#ifdef CONFIG_MTK_PSEUDO_M4U
+#ifdef CONFIG_MTK_IOMMU_V2
 extern struct device *g_iommu_device;
 #endif
 
 extern atomic64_t page_sz_cnt;
-
 #endif /* _ION_PRIV_H */
